@@ -1,0 +1,130 @@
+{
+  "ohos-module-entry": {
+    "SELECT_TARGET": "default",
+    "MODULE_BUILD_DIR": "E:\\new-chat\\entry\\build",
+    "TARGETS": {
+      "default": {
+        "SOURCE_ROOT": "E:\\new-chat\\entry\\src\\main",
+        "RESOURCES_PATH": [
+          "E:\\new-chat\\entry\\src\\main\\resources"
+        ],
+        "BUILD_PATH": {
+          "OUTPUT_PATH": "E:\\new-chat\\entry\\build\\default\\outputs\\default",
+          "INTERMEDIA_PATH": "E:\\new-chat\\entry\\build\\default\\intermediates",
+          "JS_ASSETS_PATH": "E:\\new-chat\\entry\\build\\default\\intermediates\\loader_out\\default",
+          "JS_LITE_ASSETS_PATH": "E:\\new-chat\\entry\\build\\default\\intermediates\\loader_out_lite\\default",
+          "RES_PATH": "E:\\new-chat\\entry\\build\\default\\intermediates\\res\\default",
+          "RES_PROFILE_PATH": "E:\\new-chat\\entry\\build\\default\\intermediates\\res\\default\\resources\\base\\profile",
+          "ETS_SUPER_VISUAL_PATH": "E:\\new-chat\\entry\\build\\default\\cache\\default\\default@CompileArkTS\\esmodule",
+          "JS_SUPER_VISUAL_PATH": "E:\\new-chat\\entry\\build\\default\\cache\\default\\default@CompileJS\\jsbundle",
+          "WORKER_LOADER": "E:\\new-chat\\entry\\build\\default\\intermediates\\loader\\default\\loader.json",
+          "MANIFEST_JSON": "E:\\new-chat\\entry\\build\\default\\intermediates\\manifest\\default",
+          "OUTPUT_METADATA_JSON": "E:\\new-chat\\entry\\build\\default\\intermediates\\hap_metadata\\default\\output_metadata.json",
+          "SOURCE_MAP_DIR": "E:\\new-chat\\entry\\build\\default\\intermediates\\source_map\\default"
+        },
+        "BUILD_OPTION": {
+          "debuggable": true
+        }
+      }
+    },
+    "BUILD_OPTION": {
+      "default-default": {
+        "debuggable": true,
+        "copyFrom": "default"
+      }
+    },
+    "BUILD_PROFILE_OPT": {
+      "apiType": "stageMode",
+      "buildOption": {},
+      "targets": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    "BUILD_CACHE_DIR": ""
+  },
+  "ohos-project": {
+    "SELECT_PRODUCT_NAME": "default",
+    "MODULE_BUILD_DIR": "E:\\new-chat\\build",
+    "BUNDLE_NAME": "com.example.zhuigengbu",
+    "BUILD_PATH": {
+      "OUTPUT_PATH": "E:\\new-chat\\build\\outputs\\default"
+    },
+    "MODULES": [
+      {
+        "name": "entry",
+        "srcPath": "E:\\new-chat\\entry",
+        "targets": [
+          {
+            "name": "default",
+            "applyToProducts": [
+              "default"
+            ]
+          }
+        ],
+        "belongProjectPath": "E:\\new-chat"
+      }
+    ],
+    "PROFILE_OPT": {
+      "app": {
+        "signingConfigs": [
+          {
+            "name": "default",
+            "type": "HarmonyOS",
+            "material": {
+              "certpath": "C:\\Users\\Admin\\.ohos\\config\\default_new-chat_ZRzIViYJsKR1uvIVHidkGTJjCd79EUxByiySNdODe-M=.cer",
+              "keyAlias": "debugKey",
+              "keyPassword": "0000001B6B916AFB595D88330A72BAE04740B3262F4F899FB05F863B3D9706838964B7B25E91C2E3BEDB17",
+              "profile": "C:\\Users\\Admin\\.ohos\\config\\default_new-chat_ZRzIViYJsKR1uvIVHidkGTJjCd79EUxByiySNdODe-M=.p7b",
+              "signAlg": "SHA256withECDSA",
+              "storeFile": "C:\\Users\\Admin\\.ohos\\config\\default_new-chat_ZRzIViYJsKR1uvIVHidkGTJjCd79EUxByiySNdODe-M=.p12",
+              "storePassword": "0000001B3953EDB3102D04E9B0A2598C90D49DF810451926802C3F69CA8F9D664748C8C428012D6DFA73A1"
+            }
+          }
+        ],
+        "products": [
+          {
+            "name": "default",
+            "signingConfig": "default",
+            "compatibleSdkVersion": "5.0.0(12)",
+            "targetSdkVersion": "5.0.0(12)",
+            "runtimeOS": "HarmonyOS"
+          }
+        ],
+        "buildModeSet": [
+          {
+            "name": "debug"
+          },
+          {
+            "name": "release"
+          }
+        ]
+      },
+      "modules": [
+        {
+          "name": "entry",
+          "srcPath": "./entry",
+          "targets": [
+            {
+              "name": "default",
+              "applyToProducts": [
+                "default"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "CONFIG_PROPERTIES": {
+      "enableSignTask": true,
+      "skipNativeIncremental": false,
+      "hvigor.keepDependency": true
+    },
+    "OVERALL_PROJECT_PATHS": [
+      "E:\\new-chat"
+    ],
+    "BUILD_CACHE_DIR": ""
+  },
+  "version": 1
+}

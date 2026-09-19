@@ -1,0 +1,8 @@
+{
+  "entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets": [
+    "Column",
+    "Row",
+    "Text",
+    "Blank"
+  ]
+}

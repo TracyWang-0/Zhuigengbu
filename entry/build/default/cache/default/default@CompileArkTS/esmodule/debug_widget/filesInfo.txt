@@ -1,0 +1,1 @@
+E:/new-chat/entry/build/default/cache/default/default@CompileArkTS/esmodule/debug_widget/entry/src/main/ets/widget/pages/WatchingCard.ts;com.example.zhuigengbu/entry/ets/widget/pages/WatchingCard;esm;entry|entry|1.0.0|src/main/ets/widget/pages/WatchingCard.ts;entry;false;ets

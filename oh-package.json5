@@ -1,0 +1,10 @@
+{
+  "modelVersion": "6.0.1",
+  "name": "zhuigengbu",
+  "version": "1.0.0",
+  "description": "视频追更与精确进度记录",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

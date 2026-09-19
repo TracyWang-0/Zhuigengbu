@@ -1,0 +1,23 @@
+{
+  "forms": [
+    {
+      "name": "WatchingCard",
+      "displayName": "$string:watching_card_name",
+      "description": "$string:watching_card_desc",
+      "src": "./ets/widget/pages/WatchingCard.ets",
+      "uiSyntax": "arkts",
+      "window": {
+        "designWidth": 720,
+        "autoDesignWidth": true
+      },
+      "colorMode": "auto",
+      "isDynamic": true,
+      "isDefault": true,
+      "updateEnabled": true,
+      "scheduledUpdateTime": "08:30",
+      "updateDuration": 1,
+      "defaultDimension": "4*4",
+      "supportDimensions": ["2*4", "4*4"]
+    }
+  ]
+}

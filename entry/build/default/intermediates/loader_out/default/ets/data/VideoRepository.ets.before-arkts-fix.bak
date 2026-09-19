@@ -1,0 +1,31 @@
+import preferences from '@ohos.data.preferences';
+import common from '@ohos.app.ability.common';
+import { VideoItem } from '../model/VideoItem';
+
+const STORE_NAME = 'zhuigengbu';
+const LIST_KEY = 'videos';
+
+export class VideoRepository {
+  private store?: preferences.Preferences;
+
+  constructor(private context: common.Context) {}
+
+  async load(): Promise<VideoItem[]> {
+    this.store = await preferences.getPreferences(this.context, { name: STORE_NAME });
+    const raw = await this.store.get(LIST_KEY, '[]') as string;
+    try {
+      const parsed = JSON.parse(raw) as VideoItem[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async save(items: VideoItem[]): Promise<void> {
+    if (!this.store) {
+      this.store = await preferences.getPreferences(this.context, { name: STORE_NAME });
+    }
+    await this.store.put(LIST_KEY, JSON.stringify(items));
+    await this.store.flush();
+  }
+}

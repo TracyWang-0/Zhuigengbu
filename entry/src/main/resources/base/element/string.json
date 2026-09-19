@@ -1,0 +1,12 @@
+{
+  "string": [
+    { "name": "app_name", "value": "追更簿" },
+    { "name": "module_desc", "value": "视频追更与进度记录" },
+    { "name": "EntryAbility_desc", "value": "追更簿主页面" },
+    { "name": "EntryAbility_label", "value": "追更簿" },
+    { "name": "EntryFormAbility_desc", "value": "展示正在追的视频" },
+    { "name": "EntryFormAbility_label", "value": "追更卡片" },
+    { "name": "watching_card_name", "value": "正在追" },
+    { "name": "watching_card_desc", "value": "桌面展示最近在追的 3 个视频，点击即可打开对应平台观看" }
+  ]
+}
