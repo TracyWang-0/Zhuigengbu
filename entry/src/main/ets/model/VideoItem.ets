@@ -5,6 +5,7 @@ export interface VideoItem {
   title: string;
   platform: Platform;
   url: string;
+  coverUrl: string;
   episode: number;
   totalEpisodes: number;
   progressSeconds: number;
@@ -18,14 +19,36 @@ export interface VideoItem {
 
 export const PLATFORMS: Platform[] = ['哔哩哔哩', '腾讯视频', '爱奇艺', '优酷', '芒果TV', '其他'];
 
-export function detectPlatform(url: string): Platform {
-  const value = url.toLowerCase();
-  if (value.includes('bilibili.com') || value.includes('b23.tv')) return '哔哩哔哩';
-  if (value.includes('v.qq.com')) return '腾讯视频';
-  if (value.includes('iqiyi.com')) return '爱奇艺';
-  if (value.includes('youku.com')) return '优酷';
-  if (value.includes('mgtv.com')) return '芒果TV';
+export function detectPlatform(text: string): Platform {
+  const value = text.toLowerCase();
+  if (containsAny(value, ['bilibili.com', 'b23.tv', 'b23.wtf', 'bili2233.cn', 'bili22.cn', 'bilibili://', '哔哩哔哩', 'bilibili'])) {
+    return '哔哩哔哩';
+  }
+  if (containsAny(value, [
+    'v.qq.com', 'm.v.qq.com', '3g.v.qq.com', 'film.qq.com', 'video.qq.com',
+    'wetv.vip', 'tencentvideo.com', 'tenvideo2://', 'txvideo://', 'qqlive://', '腾讯视频'
+  ])) {
+    return '腾讯视频';
+  }
+  if (containsAny(value, ['iqiyi.com', 'iqiyi.cn', 'iq.com', 'qiyi.com', 'pps.tv', 'iqiyipic.com', 'iqiyi://', '爱奇艺'])) {
+    return '爱奇艺';
+  }
+  if (containsAny(value, ['youku.com', 'youku.tv', 'soku.com', 'ykimg.com', 'youku://', '优酷'])) {
+    return '优酷';
+  }
+  if (containsAny(value, ['mgtv.com', 'hunantv.com', 'imgo.tv', '芒果tv', '芒果TV'])) {
+    return '芒果TV';
+  }
   return '其他';
+}
+
+function containsAny(value: string, tokens: string[]): boolean {
+  for (let i = 0; i < tokens.length; i++) {
+    if (value.indexOf(tokens[i]) >= 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function toTime(seconds: number): string {
@@ -38,9 +61,15 @@ export function toTime(seconds: number): string {
 }
 
 export function parseTime(value: string): number {
-  const parts = value.trim().split(':').map((part) => Number(part));
-  if (parts.some((part) => !Number.isFinite(part) || part < 0) || parts.length > 3) return 0;
-  if (parts.length === 1) return Math.floor(parts[0]);
-  if (parts.length === 2) return Math.floor(parts[0] * 60 + parts[1]);
+  const parts = value.trim().split(':').map((part: string) => Number(part));
+  if (parts.some((part: number) => !Number.isFinite(part) || part < 0) || parts.length > 3) {
+    return 0;
+  }
+  if (parts.length === 1) {
+    return Math.floor(parts[0]);
+  }
+  if (parts.length === 2) {
+    return Math.floor(parts[0] * 60 + parts[1]);
+  }
   return Math.floor(parts[0] * 3600 + parts[1] * 60 + parts[2]);
 }

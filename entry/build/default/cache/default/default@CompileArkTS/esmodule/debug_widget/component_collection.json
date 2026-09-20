@@ -3,6 +3,20 @@
     "Column",
     "Row",
     "Text",
-    "Blank"
+    "Blank",
+    "List",
+    "ForEach",
+    "ListItem",
+    "If"
+  ],
+  "entry\\src\\main\\ets\\data\\WatchingCardData.ets": [
+    "If"
+  ],
+  "entry\\src\\main\\ets\\component\\CoverThumb.ets": [
+    "Stack",
+    "Column",
+    "Text",
+    "Image",
+    "If"
   ]
 }

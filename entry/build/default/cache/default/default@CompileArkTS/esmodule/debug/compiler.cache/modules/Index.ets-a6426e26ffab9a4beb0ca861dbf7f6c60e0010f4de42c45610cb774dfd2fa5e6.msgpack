@@ -1,11 +1,15 @@
-Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚæif (!("finalizeConstruction" in ViewPU.prototype)) {
+Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚ¥
+if (!("finalizeConstruction" in ViewPU.prototype)) {
     Reflect.set(ViewPU.prototype, "finalizeConstruction", () => { });
 }
-import { detectPlatform, parseTime, toTime } from '../model/VideoItem';
+import { PLATFORMS, detectPlatform, parseTime, toTime } from '../model/VideoItem';
 import { VideoRepository } from '../data/VideoRepository';
-import { resolveVideoTitle } from '../data/TitleResolver';
+import { parseShareText } from '../data/ShareParser';
+import { resolveVideoMeta } from '../data/TitleResolver';
 import { openVideoLink } from '../data/VideoLauncher';
 import { refreshAllWatchingForms } from '../data/FormUpdater';
+import { CoverThumb } from '../component/CoverThumb';
+import { normalizeCoverUrl } from '../data/WatchingCardData';
 class Index extends ViewPU {
     constructor(parent, params, __localStorage, elmtId = -1, paramsLambda = undefined, extraInfo) {
         super(parent, __localStorage, elmtId, extraInfo);
@@ -21,8 +25,9 @@ class Index extends ViewPU {
         this.__platform = new ObservedPropertySimplePU('å…¶ä»–', this, "platform");
         this.__episodeText = new ObservedPropertySimplePU('', this, "episodeText");
         this.__totalEpisodesText = new ObservedPropertySimplePU('', this, "totalEpisodesText");
-        this.__progressText = new ObservedPropertySimplePU('00:00', this, "progressText");
+        this.__progressText = new ObservedPropertySimplePU('', this, "progressText");
         this.__durationText = new ObservedPropertySimplePU('', this, "durationText");
+        this.__coverUrl = new ObservedPropertySimplePU('', this, "coverUrl");
         this.__note = new ObservedPropertySimplePU('', this, "note");
         this.__completed = new ObservedPropertySimplePU(false, this, "completed");
         this.__resolvingTitle = new ObservedPropertySimplePU(false, this, "resolvingTitle");
@@ -68,6 +73,9 @@ class Index extends ViewPU {
         if (params.durationText !== undefined) {
             this.durationText = params.durationText;
         }
+        if (params.coverUrl !== undefined) {
+            this.coverUrl = params.coverUrl;
+        }
         if (params.note !== undefined) {
             this.note = params.note;
         }
@@ -107,6 +115,7 @@ class Index extends ViewPU {
         this.__totalEpisodesText.purgeDependencyOnElmtId(rmElmtId);
         this.__progressText.purgeDependencyOnElmtId(rmElmtId);
         this.__durationText.purgeDependencyOnElmtId(rmElmtId);
+        this.__coverUrl.purgeDependencyOnElmtId(rmElmtId);
         this.__note.purgeDependencyOnElmtId(rmElmtId);
         this.__completed.purgeDependencyOnElmtId(rmElmtId);
         this.__resolvingTitle.purgeDependencyOnElmtId(rmElmtId);
@@ -125,6 +134,7 @@ class Index extends ViewPU {
         this.__totalEpisodesText.aboutToBeDeleted();
         this.__progressText.aboutToBeDeleted();
         this.__durationText.aboutToBeDeleted();
+        this.__coverUrl.aboutToBeDeleted();
         this.__note.aboutToBeDeleted();
         this.__completed.aboutToBeDeleted();
         this.__resolvingTitle.aboutToBeDeleted();
@@ -199,6 +209,12 @@ class Index extends ViewPU {
     set durationText(newValue) {
         this.__durationText.set(newValue);
     }
+    get coverUrl() {
+        return this.__coverUrl.get();
+    }
+    set coverUrl(newValue) {
+        this.__coverUrl.set(newValue);
+    }
     get note() {
         return this.__note.get();
     }
@@ -242,7 +258,26 @@ class Index extends ViewPU {
         if (!this.repository) {
             return;
         }
-        this.videos = (await this.repository.load()).sort((a, b) => b.updatedAt - a.updatedAt);
+        const loaded = await this.repository.load();
+        let changed = false;
+        this.videos = loaded.map((item) => {
+            const detected = detectPlatform(item.url);
+            if (detected !== 'å…¶ä»–' && item.platform !== detected) {
+                item.platform = detected;
+                changed = true;
+            }
+            if (typeof item.coverUrl !== 'string') {
+                item.coverUrl = '';
+            }
+            else {
+                item.coverUrl = normalizeCoverUrl(item.coverUrl);
+            }
+            return item;
+        }).sort((a, b) => b.updatedAt - a.updatedAt);
+        if (changed) {
+            await this.persist();
+        }
+        this.fillMissingCovers();
     }
     visibleVideos() {
         if (this.filter === 'åœ¨è¿½') {
@@ -254,46 +289,71 @@ class Index extends ViewPU {
         return this.videos;
     }
     handleUrlChange(value) {
-        this.url = value;
-        this.platform = detectPlatform(value);
+        const parsed = parseShareText(value);
+        const extractedUrl = parsed.url.length > 0 ? parsed.url : value.trim();
+        this.url = extractedUrl;
+        const fromUrl = detectPlatform(extractedUrl.length > 0 ? extractedUrl : value);
+        this.platform = fromUrl !== 'å…¶ä»–' ? fromUrl : detectPlatform(value);
+        if (parsed.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+            this.title = parsed.title;
+            this.titleFromLink = true;
+        }
         if (this.titleTimer >= 0) {
             clearTimeout(this.titleTimer);
             this.titleTimer = -1;
         }
-        const trimmed = value.trim();
-        if (!/^https?:\/\//i.test(trimmed)) {
+        if (!/^https?:\/\//i.test(extractedUrl)) {
             this.resolvingTitle = false;
-            this.titleHint = '';
-            return;
-        }
-        if (this.title.trim().length > 0 && !this.titleFromLink) {
-            this.resolvingTitle = false;
+            if (this.platform === 'å…¶ä»–') {
+                this.titleHint = '';
+            }
             return;
         }
         const token = ++this.titleToken;
         this.resolvingTitle = true;
         this.titleHint = 'æ­£åœ¨è¯†åˆ«æ ‡é¢˜â€¦';
         this.titleTimer = setTimeout(() => {
-            this.fetchTitle(trimmed, token);
+            this.fetchMeta(extractedUrl, token);
         }, 450);
     }
-    async fetchTitle(url, token) {
+    handleTitleChange(value) {
+        const parsed = parseShareText(value);
+        if (parsed.url.length > 0 && (this.url.trim().length === 0 || this.url.trim() === value.trim())) {
+            this.handleUrlChange(value);
+            return;
+        }
+        this.title = value;
+        this.titleFromLink = false;
+    }
+    async fetchMeta(url, token) {
         try {
-            const detectedTitle = await resolveVideoTitle(url);
+            const meta = await resolveVideoMeta(url);
             if (token !== this.titleToken || this.url.trim() !== url) {
                 return;
             }
-            if (detectedTitle.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
-                this.title = detectedTitle;
+            if (meta.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+                this.title = meta.title;
                 this.titleFromLink = true;
                 this.titleHint = 'å·²æ ¹æ®é“¾æŽ¥å¡«å……æ ‡é¢˜ï¼Œå¯å†ç¼–è¾‘';
-                const episodeMatch = detectedTitle.match(/ç¬¬\s*(\d+)\s*é›†/);
+                const episodeMatch = meta.title.match(/ç¬¬\s*(\d+)\s*é›†/);
                 if (episodeMatch && episodeMatch[1] && this.episodeText.length === 0) {
                     this.episodeText = episodeMatch[1];
                 }
             }
+            else if (this.title.trim().length > 0) {
+                this.titleHint = 'å·²ä»Žåˆ†äº«å†…å®¹è¯†åˆ«ï¼Œå¯å†ç¼–è¾‘';
+            }
             else {
                 this.titleHint = 'æœªèƒ½è‡ªåŠ¨è¯†åˆ«æ ‡é¢˜ï¼Œè¯·æ‰‹åŠ¨å¡«å†™';
+            }
+            if (meta.coverUrl.length > 0) {
+                this.coverUrl = meta.coverUrl;
+            }
+            if (meta.durationSeconds > 0 && this.durationText.trim().length === 0) {
+                this.durationText = toTime(meta.durationSeconds);
+            }
+            if (meta.progressSeconds > 0 && this.progressText.trim().length === 0) {
+                this.progressText = toTime(meta.progressSeconds);
             }
         }
         catch (_resolveError) {
@@ -307,6 +367,35 @@ class Index extends ViewPU {
             }
         }
     }
+    async fillMissingCovers() {
+        let changed = false;
+        for (let i = 0; i < this.videos.length; i++) {
+            if (typeof this.videos[i].coverUrl === 'string' && this.videos[i].coverUrl.length > 0) {
+                continue;
+            }
+            try {
+                const meta = await resolveVideoMeta(this.videos[i].url);
+                if (meta.coverUrl.length > 0) {
+                    this.videos[i].coverUrl = meta.coverUrl;
+                    changed = true;
+                }
+                if (this.videos[i].durationSeconds === 0 && meta.durationSeconds > 0) {
+                    this.videos[i].durationSeconds = meta.durationSeconds;
+                    changed = true;
+                }
+                if (this.videos[i].progressSeconds === 0 && meta.progressSeconds > 0) {
+                    this.videos[i].progressSeconds = meta.progressSeconds;
+                    changed = true;
+                }
+            }
+            catch (metaError) {
+            }
+        }
+        if (changed) {
+            this.videos = this.videos.slice(0);
+            await this.persist();
+        }
+    }
     newVideo() {
         this.editingId = '';
         this.title = '';
@@ -314,8 +403,9 @@ class Index extends ViewPU {
         this.platform = 'å…¶ä»–';
         this.episodeText = '';
         this.totalEpisodesText = '';
-        this.progressText = '00:00';
+        this.progressText = '';
         this.durationText = '';
+        this.coverUrl = '';
         this.note = '';
         this.completed = false;
         this.titleHint = '';
@@ -330,8 +420,9 @@ class Index extends ViewPU {
         this.platform = item.platform;
         this.episodeText = item.episode > 0 ? item.episode.toString() : '';
         this.totalEpisodesText = item.totalEpisodes > 0 ? item.totalEpisodes.toString() : '';
-        this.progressText = toTime(item.progressSeconds);
+        this.progressText = item.progressSeconds > 0 ? toTime(item.progressSeconds) : '';
         this.durationText = item.durationSeconds > 0 ? toTime(item.durationSeconds) : '';
+        this.coverUrl = typeof item.coverUrl === 'string' ? item.coverUrl : '';
         this.note = item.note;
         this.completed = item.completed;
         this.titleHint = '';
@@ -347,19 +438,40 @@ class Index extends ViewPU {
         await this.repository.save(this.videos);
         const context = this.getUIContext().getHostContext();
         if (context) {
-            await refreshAllWatchingForms(context);
+            await refreshAllWatchingForms(context, this.videos);
         }
     }
     async saveVideo() {
-        if (this.title.trim().length === 0 || this.url.trim().length === 0) {
+        const parsed = parseShareText(this.url.length > 0 ? this.url : this.title);
+        const finalUrl = parsed.url.length > 0 ? parsed.url : this.url.trim();
+        const finalTitle = this.title.trim().length > 0 ? this.title.trim() : parsed.title;
+        if (finalTitle.length === 0 || finalUrl.length === 0) {
             return;
         }
+        if (this.coverUrl.length === 0 || this.durationText.trim().length === 0) {
+            try {
+                const meta = await resolveVideoMeta(finalUrl);
+                if (this.coverUrl.length === 0 && meta.coverUrl.length > 0) {
+                    this.coverUrl = meta.coverUrl;
+                }
+                if (this.durationText.trim().length === 0 && meta.durationSeconds > 0) {
+                    this.durationText = toTime(meta.durationSeconds);
+                }
+                if (this.progressText.trim().length === 0 && meta.progressSeconds > 0) {
+                    this.progressText = toTime(meta.progressSeconds);
+                }
+            }
+            catch (metaError) {
+            }
+        }
         const now = Date.now();
+        const detected = detectPlatform(`${finalUrl} ${finalTitle}`);
         const item = {
             id: this.editingId || `${now}`,
-            title: this.title.trim(),
-            url: this.url.trim(),
-            platform: this.platform === 'å…¶ä»–' ? detectPlatform(this.url) : this.platform,
+            title: finalTitle,
+            url: finalUrl,
+            coverUrl: normalizeCoverUrl(this.coverUrl),
+            platform: detected !== 'å…¶ä»–' ? detected : this.platform,
             episode: Number(this.episodeText) || 0,
             totalEpisodes: Number(this.totalEpisodesText) || 0,
             progressSeconds: parseTime(this.progressText),
@@ -384,12 +496,33 @@ class Index extends ViewPU {
         this.videos = this.videos.filter((item) => item.id !== id);
         await this.persist();
     }
+    confirmRemove(item) {
+        this.getUIContext().showAlertDialog({
+            title: 'ç¡®è®¤åˆ é™¤',
+            message: `ç¡®å®šåˆ é™¤ã€Œ${item.title}ã€å—ï¼Ÿåˆ é™¤åŽæ— æ³•æ¢å¤ã€‚`,
+            autoCancel: true,
+            primaryButton: {
+                value: 'å–æ¶ˆ',
+                action: () => {
+                }
+            },
+            secondaryButton: {
+                value: 'åˆ é™¤',
+                fontColor: '#C53B3B',
+                action: () => {
+                    this.removeVideo(item.id);
+                }
+            }
+        });
+    }
     async openWatch(item) {
         const context = this.getUIContext().getHostContext();
         if (!context) {
             return;
         }
-        await openVideoLink(context, item.url);
+        const detected = detectPlatform(item.url);
+        const platform = detected !== 'å…¶ä»–' ? detected : item.platform;
+        await openVideoLink(context, item.url, platform, item.progressSeconds);
     }
     FilterButton(name, parent = null) {
         this.observeComponentCreation2((elmtId, isInitialRender) => {
@@ -412,9 +545,49 @@ class Index extends ViewPU {
             Column.width('100%');
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Column.create({ space: 10 });
-            Column.width('100%');
-            Column.onClick(() => this.openWatch(item));
+            Row.create({ space: 12 });
+            Row.width('100%');
+            Row.onClick(() => this.openWatch(item));
+        }, Row);
+        {
+            this.observeComponentCreation2((elmtId, isInitialRender) => {
+                if (isInitialRender) {
+                    let componentCall = new CoverThumb(this, {
+                        cover: normalizeCoverUrl(item.coverUrl),
+                        platform: item.platform,
+                        thumbWidth: 84,
+                        thumbHeight: 112,
+                        radius: 10,
+                        fontSize: 11
+                    }, undefined, elmtId, () => { }, { page: "entry/src/main/ets/pages/Index.ets", line: 336, col: 9 });
+                    ViewPU.create(componentCall);
+                    let paramsLambda = () => {
+                        return {
+                            cover: normalizeCoverUrl(item.coverUrl),
+                            platform: item.platform,
+                            thumbWidth: 84,
+                            thumbHeight: 112,
+                            radius: 10,
+                            fontSize: 11
+                        };
+                    };
+                    componentCall.paramsGenerator_ = paramsLambda;
+                }
+                else {
+                    this.updateStateVarsOfChildByElmtId(elmtId, {
+                        cover: normalizeCoverUrl(item.coverUrl),
+                        platform: item.platform,
+                        thumbWidth: 84,
+                        thumbHeight: 112,
+                        radius: 10,
+                        fontSize: 11
+                    });
+                }
+            }, { name: "CoverThumb" });
+        }
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            Column.create({ space: 8 });
+            Column.layoutWeight(1);
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Row.create();
@@ -444,7 +617,7 @@ class Index extends ViewPU {
             Text.create(item.title);
             Text.fontSize(18);
             Text.fontWeight(FontWeight.Medium);
-            Text.maxLines(1);
+            Text.maxLines(2);
             Text.textOverflow({ overflow: TextOverflow.Ellipsis });
             Text.width('100%');
         }, Text);
@@ -458,18 +631,37 @@ class Index extends ViewPU {
         Text.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
-            if (item.durationSeconds > 0) {
+            if (item.progressSeconds > 0) {
                 this.ifElseBranchUpdateFunction(0, () => {
                     this.observeComponentCreation2((elmtId, isInitialRender) => {
-                        Progress.create({
-                            value: Math.min(item.progressSeconds, item.durationSeconds),
-                            total: item.durationSeconds,
-                            type: ProgressType.Linear
-                        });
-                        Progress.color('#2F6BFF');
-                        Progress.backgroundColor('#E6EAF0');
-                        Progress.width('100%');
-                    }, Progress);
+                        If.create();
+                        if (item.durationSeconds > 0) {
+                            this.ifElseBranchUpdateFunction(0, () => {
+                                this.observeComponentCreation2((elmtId, isInitialRender) => {
+                                    Progress.create({
+                                        value: Math.min(item.progressSeconds, item.durationSeconds),
+                                        total: item.durationSeconds,
+                                        type: ProgressType.Linear
+                                    });
+                                    Progress.color('#2F6BFF');
+                                    Progress.backgroundColor('#E6EAF0');
+                                    Progress.width('100%');
+                                }, Progress);
+                            });
+                        }
+                        else {
+                            this.ifElseBranchUpdateFunction(1, () => {
+                            });
+                        }
+                    }, If);
+                    If.pop();
+                    this.observeComponentCreation2((elmtId, isInitialRender) => {
+                        Text.create(`è¿›åº¦ ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`);
+                        Text.fontSize(14);
+                        Text.fontColor('#3E4B5F');
+                        Text.width('100%');
+                    }, Text);
+                    Text.pop();
                 });
             }
             else {
@@ -478,13 +670,6 @@ class Index extends ViewPU {
             }
         }, If);
         If.pop();
-        this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Text.create(`è¿›åº¦ ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`);
-            Text.fontSize(14);
-            Text.fontColor('#3E4B5F');
-            Text.width('100%');
-        }, Text);
-        Text.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
             if (item.note.length > 0) {
@@ -507,16 +692,11 @@ class Index extends ViewPU {
         }, If);
         If.pop();
         Column.pop();
+        Row.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Row.create({ space: 8 });
             Row.width('100%');
         }, Row);
-        this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Button.createWithLabel('ç»§ç»­è§‚çœ‹');
-            Button.layoutWeight(1);
-            Button.onClick(() => this.openWatch(item));
-        }, Button);
-        Button.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Button.createWithLabel('æ›´æ–°è¿›åº¦');
             Button.layoutWeight(1);
@@ -527,7 +707,7 @@ class Index extends ViewPU {
             Button.createWithLabel('åˆ é™¤');
             Button.fontColor('#C53B3B');
             Button.backgroundColor('#FFF0F0');
-            Button.onClick(() => this.removeVideo(item.id));
+            Button.onClick(() => this.confirmRemove(item));
         }, Button);
         Button.pop();
         Row.pop();
@@ -539,7 +719,12 @@ class Index extends ViewPU {
             Stack.height('100%');
             Stack.bindSheet({ value: this.showEditor, changeEvent: newValue => { this.showEditor = newValue; } }, { builder: () => {
                     this.EditorSheet.call(this);
-                } }, { height: 620, showClose: true });
+                } }, {
+                height: 680,
+                showClose: true,
+                dragBar: true,
+                title: this.editorSheetTitle()
+            });
         }, Stack);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Column.create();
@@ -623,6 +808,8 @@ class Index extends ViewPU {
                         List.create({ space: 12 });
                         List.layoutWeight(1);
                         List.width('100%');
+                        List.padding({ bottom: 56 });
+                        List.scrollBar(BarState.Off);
                     }, List);
                     this.observeComponentCreation2((elmtId, isInitialRender) => {
                         ForEach.create();
@@ -665,11 +852,17 @@ class Index extends ViewPU {
             Button.backgroundColor('#2F6BFF');
             Button.borderRadius(24);
             Button.padding({ left: 20, right: 20 });
-            Button.margin(24);
+            Button.margin({ left: 20, right: 20, bottom: 16 });
             Button.onClick(() => this.newVideo());
         }, Button);
         Button.pop();
         Stack.pop();
+    }
+    editorSheetTitle() {
+        const options = {
+            title: this.editingId.length > 0 ? 'æ›´æ–°è¿›åº¦' : 'æ·»åŠ è§†é¢‘'
+        };
+        return options;
     }
     EditorSheet(parent = null) {
         this.observeComponentCreation2((elmtId, isInitialRender) => {
@@ -677,27 +870,48 @@ class Index extends ViewPU {
         }, Scroll);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Column.create({ space: 14 });
-            Column.padding({ left: 20, right: 20, top: 10, bottom: 32 });
+            Column.padding({ left: 20, right: 20, top: 24, bottom: 36 });
             Column.width('100%');
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            TextInput.create({ placeholder: 'è§†é¢‘æ ‡é¢˜ï¼ˆç²˜è´´é“¾æŽ¥åŽè‡ªåŠ¨å¡«å……ï¼‰', text: this.title });
-            TextInput.onChange((value) => {
-                this.title = value;
-                this.titleFromLink = false;
-            });
+            TextInput.create({ placeholder: 'è§†é¢‘æ ‡é¢˜ï¼ˆå¯ç²˜è´´åˆ†äº«å£ä»¤ï¼‰', text: this.title });
+            TextInput.onChange((value) => this.handleTitleChange(value));
         }, TextInput);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            TextInput.create({ placeholder: 'ç²˜è´´è§†é¢‘é“¾æŽ¥ï¼ˆå¿…å¡«ï¼‰', text: this.url });
+            TextInput.create({ placeholder: 'ç²˜è´´åˆ†äº«å†…å®¹æˆ–é“¾æŽ¥ï¼ˆå¿…å¡«ï¼‰', text: this.url });
             TextInput.onChange((value) => this.handleUrlChange(value));
         }, TextInput);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Text.create(`å¹³å°ï¼š${this.platform}`);
-            Text.fontSize(14);
+            Text.create('å¹³å°æ ‡ç­¾');
+            Text.fontSize(13);
             Text.fontColor('#637083');
             Text.width('100%');
         }, Text);
         Text.pop();
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            Flex.create({ wrap: FlexWrap.Wrap });
+            Flex.width('100%');
+        }, Flex);
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            ForEach.create();
+            const forEachItemGenFunction = _item => {
+                const name = _item;
+                this.observeComponentCreation2((elmtId, isInitialRender) => {
+                    Text.create(name);
+                    Text.fontSize(12);
+                    Text.fontColor(this.platform === name ? Color.White : '#2F6BFF');
+                    Text.backgroundColor(this.platform === name ? '#2F6BFF' : '#E8F0FF');
+                    Text.padding({ left: 10, right: 10, top: 6, bottom: 6 });
+                    Text.borderRadius(8);
+                    Text.margin({ right: 8, bottom: 8 });
+                    Text.onClick(() => this.platform = name);
+                }, Text);
+                Text.pop();
+            };
+            this.forEachUpdateFunction(elmtId, PLATFORMS, forEachItemGenFunction, (name) => name, false, false);
+        }, ForEach);
+        ForEach.pop();
+        Flex.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
             if (this.titleHint.length > 0) {
@@ -794,12 +1008,15 @@ class Index extends ViewPU {
     }
 }
 registerNamedRoute(() => new Index(undefined, {}), "", { bundleName: "com.example.zhuigengbu", moduleName: "entry", pagePath: "pages/Index", pageFullPath: "entry/src/main/ets/pages/Index", integratedHsp: "false", moduleType: "followWithHap" });
-//# sourceMappingURL=Index.js.mapÂ•Ù2E:\new-chat\entry\src\main\ets\model\VideoItem.etsÙ7E:\new-chat\entry\src\main\ets\data\VideoRepository.etsÙ5E:\new-chat\entry\src\main\ets\data\TitleResolver.etsÙ5E:\new-chat\entry\src\main\ets\data\VideoLauncher.etsÙ3E:\new-chat\entry\src\main\ets\data\FormUpdater.etsÙ.E:\new-chat\entry\src\main\ets\pages\Index.etsÔrB›ªmoduleName±isLocalDependency¯isNodeEntryFile§pkgPath±belongProjectPath§pkgNameªpkgVersion±dependencyPkgInfo°belongModulePath§checker¬shouldEmitJs¥entryÃÂ±E:\new-chat\entry«E:\new-chat¥entry¥1.0.0Ô  ±E:\new-chat\entryÔrCÜ ®¬getNodeCount²getIdentifierCount®getSymbolCount¬getTypeCountµgetInstantiationCountµgetRelationCacheSizes±isUndefinedSymbol±isArgumentsSymbol¯isUnknownSymbol¯getMergedSymbol®getDiagnostics´getGlobalDiagnostics´getRecursionIdentity¶getUnmatchedProperties¹getTypeOfSymbolAtLocation¯getTypeOfSymbolÙ(getSymbolsOfParameterPropertyDeclaration·getDeclaredTypeOfSymbol³getPropertiesOfType±getPropertyOfTypeÙ"getPrivateIdentifierPropertyOfType·getTypeOfPropertyOfType²getIndexInfoOfType³getIndexInfosOfTypeºgetIndexInfosOfIndexSymbol³getSignaturesOfType²getIndexTypeOfType¬getIndexType¬getBaseTypes¸getBaseTypeOfLiteralType®getWidenedType³getTypeFromTypeNode°getParameterTypeÙ$getParameterIdentifierNameAtPosition¸getPromisedTypeOfPromise®getAwaitedType¸getReturnTypeOfSignature®isNullableType¯getNullableType²getNonNullableType²getNonOptionalType°getTypeArguments®typeToTypeNodeÙ$indexInfoToIndexSignatureDeclaration¿signatureToSignatureDeclaration²symbolToEntityName²symbolToExpression¬symbolToNodeÙ!symbolToTypeParameterDeclarations¼symbolToParameterDeclarationºtypeParameterToDeclaration±getSymbolsInScope³getSymbolAtLocation·getIndexInfosAtLocationÙ!getShorthandAssignmentValueSymbolÙ#getExportSpecifierLocalTargetSymbol·getExportSymbolOfSymbol±getTypeAtLocationºgetTypeAtLocationForLinterÙ tryGetTypeAtLocationWithoutCheckºgetTypeOfAssignmentPatternÙ*getPropertySymbolOfDestructuringAssignment±signatureToString¬typeToString®symbolToStringµtypePredicateToString®writeSignature©writeType«writeSymbol²writeTypePredicate¼getAugmentedPropertiesOfType®getRootSymbols²getSymbolOfExpando±getContextualTypeÙ(getContextualTypeForObjectLiteralElementÙ#getContextualTypeForArgumentAtIndexÙ getContextualTypeForJsxAttribute²isContextSensitiveÙ!getTypeOfPropertyOfContextualTypeµgetFullyQualifiedNameÙ#tryGetResolvedSignatureWithoutCheck´getResolvedSignatureÙ/getResolvedSignatureForStringLiteralCompletionsÙ$getResolvedSignatureForSignatureHelpµgetExpandedParameters¹hasEffectiveRestParameterºcontainsArgumentsReference°getConstantValueµisValidPropertyAccessÙ#isValidPropertyAccessForCompletions»getSignatureFromDeclarationºisImplementationOfOverload¹getImmediateAliasedSymbol°getAliasedSymbol¯getEmitResolver²getExportsOfModule¿getExportsAndPropertiesOfModuleÙ forEachExportAndPropertyOfModule¯getSymbolWalker±getAmbientModules¹getJsxIntrinsicTagNamesAt³isOptionalParameter»tryGetMemberInModuleExportsÙ(tryGetMemberInModuleExportsAndProperties´tryFindAmbientModuleÙ(tryFindAmbientModuleWithoutAugmentations¯getApparentType¬getUnionType²isTypeAssignableTo³createAnonymousType¯createSignature¬createSymbol¯createIndexInfoªgetAnyType­getStringType­getNumberType±createPromiseType¯createArrayType¹getElementTypeOfArrayType®getBooleanType¬getFalseType«getTrueType«getVoidType°getUndefinedType«getNullType¯getESSymbolType¬getNeverType¯getOptionalType®getPromiseType²getPromiseLikeType´getAsyncIterableType²isSymbolAccessible«isArrayType«isTupleType¯isArrayLikeTypeÙ#isTypeInvalidDueToUnionDiscriminantºgetExactOptionalProperties¿getAllPossiblePropertiesOfTypesÙ(getSuggestedSymbolForNonexistentPropertyÙ#getSuggestionForNonexistentPropertyÙ,getSuggestedSymbolForNonexistentJSXAttributeÙ&getSuggestedSymbolForNonexistentSymbolÙ!getSuggestionForNonexistentSymbolÙ&getSuggestedSymbolForNonexistentModuleÙ!getSuggestionForNonexistentExportÙ+getSuggestedSymbolForNonexistentClassMember·getBaseConstraintOfType»getDefaultFromTypeParameter«resolveName¯getJsxNamespaceµgetJsxFragmentFactory¸getAccessibleSymbolChain»getTypePredicateOfSignature¹resolveExternalModuleName»resolveExternalModuleSymbol°tryGetThisTypeAt¹getTypeArgumentConstraint¸getSuggestionDiagnostics¸runWithCancellationTokenÙ3getLocalTypeParametersOfClassOrInterfaceOrTypeAlias´isDeclarationVisible´isPropertyAccessible»getTypeOnlyAliasDeclaration¿getMemberOverrideModifierStatusÙ!isTypeParameterPossiblyReferenced²getConstEnumRelate´clearConstEnumRelateµdeleteConstEnumRelateÙ$getTypeArgumentsForResolvedSignatureµgetCheckedSourceFilesÙ"collectHaveTsNoCheckFilesForLinter·clearQualifiedNameCache®isStaticRecord²isStaticSourceFileÔ  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  ÃÃÚ3Ëimport common from '@ohos.app.ability.common';
-import { Platform, VideoItem, detectPlatform, parseTime, toTime } from '../model/VideoItem';
+//# sourceMappingURL=Index.js.mapÂ˜Ù2E:\new-chat\entry\src\main\ets\model\VideoItem.etsÙ7E:\new-chat\entry\src\main\ets\data\VideoRepository.etsÙ3E:\new-chat\entry\src\main\ets\data\ShareParser.etsÙ5E:\new-chat\entry\src\main\ets\data\TitleResolver.etsÙ5E:\new-chat\entry\src\main\ets\data\VideoLauncher.etsÙ3E:\new-chat\entry\src\main\ets\data\FormUpdater.etsÙ7E:\new-chat\entry\src\main\ets\component\CoverThumb.etsÙ8E:\new-chat\entry\src\main\ets\data\WatchingCardData.etsÙ.E:\new-chat\entry\src\main\ets\pages\Index.etsÔrB›ªmoduleName±isLocalDependency¯isNodeEntryFile§pkgPath±belongProjectPath§pkgNameªpkgVersion±dependencyPkgInfo°belongModulePath§checker¬shouldEmitJs¥entryÃÂ±E:\new-chat\entry«E:\new-chat¥entry¥1.0.0Ô  ±E:\new-chat\entryÔrCÜ ®¬getNodeCount²getIdentifierCount®getSymbolCount¬getTypeCountµgetInstantiationCountµgetRelationCacheSizes±isUndefinedSymbol±isArgumentsSymbol¯isUnknownSymbol¯getMergedSymbol®getDiagnostics´getGlobalDiagnostics´getRecursionIdentity¶getUnmatchedProperties¹getTypeOfSymbolAtLocation¯getTypeOfSymbolÙ(getSymbolsOfParameterPropertyDeclaration·getDeclaredTypeOfSymbol³getPropertiesOfType±getPropertyOfTypeÙ"getPrivateIdentifierPropertyOfType·getTypeOfPropertyOfType²getIndexInfoOfType³getIndexInfosOfTypeºgetIndexInfosOfIndexSymbol³getSignaturesOfType²getIndexTypeOfType¬getIndexType¬getBaseTypes¸getBaseTypeOfLiteralType®getWidenedType³getTypeFromTypeNode°getParameterTypeÙ$getParameterIdentifierNameAtPosition¸getPromisedTypeOfPromise®getAwaitedType¸getReturnTypeOfSignature®isNullableType¯getNullableType²getNonNullableType²getNonOptionalType°getTypeArguments®typeToTypeNodeÙ$indexInfoToIndexSignatureDeclaration¿signatureToSignatureDeclaration²symbolToEntityName²symbolToExpression¬symbolToNodeÙ!symbolToTypeParameterDeclarations¼symbolToParameterDeclarationºtypeParameterToDeclaration±getSymbolsInScope³getSymbolAtLocation·getIndexInfosAtLocationÙ!getShorthandAssignmentValueSymbolÙ#getExportSpecifierLocalTargetSymbol·getExportSymbolOfSymbol±getTypeAtLocationºgetTypeAtLocationForLinterÙ tryGetTypeAtLocationWithoutCheckºgetTypeOfAssignmentPatternÙ*getPropertySymbolOfDestructuringAssignment±signatureToString¬typeToString®symbolToStringµtypePredicateToString®writeSignature©writeType«writeSymbol²writeTypePredicate¼getAugmentedPropertiesOfType®getRootSymbols²getSymbolOfExpando±getContextualTypeÙ(getContextualTypeForObjectLiteralElementÙ#getContextualTypeForArgumentAtIndexÙ getContextualTypeForJsxAttribute²isContextSensitiveÙ!getTypeOfPropertyOfContextualTypeµgetFullyQualifiedNameÙ#tryGetResolvedSignatureWithoutCheck´getResolvedSignatureÙ/getResolvedSignatureForStringLiteralCompletionsÙ$getResolvedSignatureForSignatureHelpµgetExpandedParameters¹hasEffectiveRestParameterºcontainsArgumentsReference°getConstantValueµisValidPropertyAccessÙ#isValidPropertyAccessForCompletions»getSignatureFromDeclarationºisImplementationOfOverload¹getImmediateAliasedSymbol°getAliasedSymbol¯getEmitResolver²getExportsOfModule¿getExportsAndPropertiesOfModuleÙ forEachExportAndPropertyOfModule¯getSymbolWalker±getAmbientModules¹getJsxIntrinsicTagNamesAt³isOptionalParameter»tryGetMemberInModuleExportsÙ(tryGetMemberInModuleExportsAndProperties´tryFindAmbientModuleÙ(tryFindAmbientModuleWithoutAugmentations¯getApparentType¬getUnionType²isTypeAssignableTo³createAnonymousType¯createSignature¬createSymbol¯createIndexInfoªgetAnyType­getStringType­getNumberType±createPromiseType¯createArrayType¹getElementTypeOfArrayType®getBooleanType¬getFalseType«getTrueType«getVoidType°getUndefinedType«getNullType¯getESSymbolType¬getNeverType¯getOptionalType®getPromiseType²getPromiseLikeType´getAsyncIterableType²isSymbolAccessible«isArrayType«isTupleType¯isArrayLikeTypeÙ#isTypeInvalidDueToUnionDiscriminantºgetExactOptionalProperties¿getAllPossiblePropertiesOfTypesÙ(getSuggestedSymbolForNonexistentPropertyÙ#getSuggestionForNonexistentPropertyÙ,getSuggestedSymbolForNonexistentJSXAttributeÙ&getSuggestedSymbolForNonexistentSymbolÙ!getSuggestionForNonexistentSymbolÙ&getSuggestedSymbolForNonexistentModuleÙ!getSuggestionForNonexistentExportÙ+getSuggestedSymbolForNonexistentClassMember·getBaseConstraintOfType»getDefaultFromTypeParameter«resolveName¯getJsxNamespaceµgetJsxFragmentFactory¸getAccessibleSymbolChain»getTypePredicateOfSignature¹resolveExternalModuleName»resolveExternalModuleSymbol°tryGetThisTypeAt¹getTypeArgumentConstraint¸getSuggestionDiagnostics¸runWithCancellationTokenÙ3getLocalTypeParametersOfClassOrInterfaceOrTypeAlias´isDeclarationVisible´isPropertyAccessible»getTypeOnlyAliasDeclaration¿getMemberOverrideModifierStatusÙ!isTypeParameterPossiblyReferenced²getConstEnumRelate´clearConstEnumRelateµdeleteConstEnumRelateÙ$getTypeArgumentsForResolvedSignatureµgetCheckedSourceFilesÙ"collectHaveTsNoCheckFilesForLinter·clearQualifiedNameCache®isStaticRecord²isStaticSourceFileÔ  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  Ô  ÃÃÚIÐimport common from '@ohos.app.ability.common';
+import { Platform, PLATFORMS, VideoItem, detectPlatform, parseTime, toTime } from '../model/VideoItem';
 import { VideoRepository } from '../data/VideoRepository';
-import { resolveVideoTitle } from '../data/TitleResolver';
+import { parseShareText } from '../data/ShareParser';
+import { resolveVideoMeta } from '../data/TitleResolver';
 import { openVideoLink } from '../data/VideoLauncher';
 import { refreshAllWatchingForms } from '../data/FormUpdater';
+import { CoverThumb } from '../component/CoverThumb';
+import { normalizeCoverUrl } from '../data/WatchingCardData';
 
 type Filter = 'å…¨éƒ¨' | 'åœ¨è¿½' | 'å·²çœ‹å®Œ';
 
@@ -815,8 +1032,9 @@ struct Index {
   @State platform: Platform = 'å…¶ä»–';
   @State episodeText: string = '';
   @State totalEpisodesText: string = '';
-  @State progressText: string = '00:00';
+  @State progressText: string = '';
   @State durationText: string = '';
+  @State coverUrl: string = '';
   @State note: string = '';
   @State completed: boolean = false;
   @State resolvingTitle: boolean = false;
@@ -840,7 +1058,25 @@ struct Index {
     if (!this.repository) {
       return;
     }
-    this.videos = (await this.repository.load()).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+    const loaded = await this.repository.load();
+    let changed = false;
+    this.videos = loaded.map((item: VideoItem) => {
+      const detected = detectPlatform(item.url);
+      if (detected !== 'å…¶ä»–' && item.platform !== detected) {
+        item.platform = detected;
+        changed = true;
+      }
+      if (typeof item.coverUrl !== 'string') {
+        item.coverUrl = '';
+      } else {
+        item.coverUrl = normalizeCoverUrl(item.coverUrl);
+      }
+      return item;
+    }).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+    if (changed) {
+      await this.persist();
+    }
+    this.fillMissingCovers();
   }
 
   visibleVideos(): VideoItem[] {
@@ -854,46 +1090,71 @@ struct Index {
   }
 
   handleUrlChange(value: string): void {
-    this.url = value;
-    this.platform = detectPlatform(value);
+    const parsed = parseShareText(value);
+    const extractedUrl = parsed.url.length > 0 ? parsed.url : value.trim();
+    this.url = extractedUrl;
+    const fromUrl = detectPlatform(extractedUrl.length > 0 ? extractedUrl : value);
+    this.platform = fromUrl !== 'å…¶ä»–' ? fromUrl : detectPlatform(value);
+    if (parsed.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+      this.title = parsed.title;
+      this.titleFromLink = true;
+    }
     if (this.titleTimer >= 0) {
       clearTimeout(this.titleTimer);
       this.titleTimer = -1;
     }
-    const trimmed = value.trim();
-    if (!/^https?:\/\//i.test(trimmed)) {
+    if (!/^https?:\/\//i.test(extractedUrl)) {
       this.resolvingTitle = false;
-      this.titleHint = '';
-      return;
-    }
-    if (this.title.trim().length > 0 && !this.titleFromLink) {
-      this.resolvingTitle = false;
+      if (this.platform === 'å…¶ä»–') {
+        this.titleHint = '';
+      }
       return;
     }
     const token = ++this.titleToken;
     this.resolvingTitle = true;
     this.titleHint = 'æ­£åœ¨è¯†åˆ«æ ‡é¢˜â€¦';
     this.titleTimer = setTimeout(() => {
-      this.fetchTitle(trimmed, token);
+      this.fetchMeta(extractedUrl, token);
     }, 450);
   }
 
-  async fetchTitle(url: string, token: number): Promise<void> {
+  handleTitleChange(value: string): void {
+    const parsed = parseShareText(value);
+    if (parsed.url.length > 0 && (this.url.trim().length === 0 || this.url.trim() === value.trim())) {
+      this.handleUrlChange(value);
+      return;
+    }
+    this.title = value;
+    this.titleFromLink = false;
+  }
+
+  async fetchMeta(url: string, token: number): Promise<void> {
     try {
-      const detectedTitle = await resolveVideoTitle(url);
+      const meta = await resolveVideoMeta(url);
       if (token !== this.titleToken || this.url.trim() !== url) {
         return;
       }
-      if (detectedTitle.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
-        this.title = detectedTitle;
+      if (meta.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+        this.title = meta.title;
         this.titleFromLink = true;
         this.titleHint = 'å·²æ ¹æ®é“¾æŽ¥å¡«å……æ ‡é¢˜ï¼Œå¯å†ç¼–è¾‘';
-        const episodeMatch = detectedTitle.match(/ç¬¬\s*(\d+)\s*é›†/);
+        const episodeMatch = meta.title.match(/ç¬¬\s*(\d+)\s*é›†/);
         if (episodeMatch && episodeMatch[1] && this.episodeText.length === 0) {
           this.episodeText = episodeMatch[1];
         }
+      } else if (this.title.trim().length > 0) {
+        this.titleHint = 'å·²ä»Žåˆ†äº«å†…å®¹è¯†åˆ«ï¼Œå¯å†ç¼–è¾‘';
       } else {
         this.titleHint = 'æœªèƒ½è‡ªåŠ¨è¯†åˆ«æ ‡é¢˜ï¼Œè¯·æ‰‹åŠ¨å¡«å†™';
+      }
+      if (meta.coverUrl.length > 0) {
+        this.coverUrl = meta.coverUrl;
+      }
+      if (meta.durationSeconds > 0 && this.durationText.trim().length === 0) {
+        this.durationText = toTime(meta.durationSeconds);
+      }
+      if (meta.progressSeconds > 0 && this.progressText.trim().length === 0) {
+        this.progressText = toTime(meta.progressSeconds);
       }
     } catch (_resolveError) {
       if (token === this.titleToken) {
@@ -906,6 +1167,35 @@ struct Index {
     }
   }
 
+  async fillMissingCovers(): Promise<void> {
+    let changed = false;
+    for (let i = 0; i < this.videos.length; i++) {
+      if (typeof this.videos[i].coverUrl === 'string' && this.videos[i].coverUrl.length > 0) {
+        continue;
+      }
+      try {
+        const meta = await resolveVideoMeta(this.videos[i].url);
+        if (meta.coverUrl.length > 0) {
+          this.videos[i].coverUrl = meta.coverUrl;
+          changed = true;
+        }
+        if (this.videos[i].durationSeconds === 0 && meta.durationSeconds > 0) {
+          this.videos[i].durationSeconds = meta.durationSeconds;
+          changed = true;
+        }
+        if (this.videos[i].progressSeconds === 0 && meta.progressSeconds > 0) {
+          this.videos[i].progressSeconds = meta.progressSeconds;
+          changed = true;
+        }
+      } catch (metaError) {
+      }
+    }
+    if (changed) {
+      this.videos = this.videos.slice(0);
+      await this.persist();
+    }
+  }
+
   newVideo(): void {
     this.editingId = '';
     this.title = '';
@@ -913,8 +1203,9 @@ struct Index {
     this.platform = 'å…¶ä»–';
     this.episodeText = '';
     this.totalEpisodesText = '';
-    this.progressText = '00:00';
+    this.progressText = '';
     this.durationText = '';
+    this.coverUrl = '';
     this.note = '';
     this.completed = false;
     this.titleHint = '';
@@ -930,8 +1221,9 @@ struct Index {
     this.platform = item.platform;
     this.episodeText = item.episode > 0 ? item.episode.toString() : '';
     this.totalEpisodesText = item.totalEpisodes > 0 ? item.totalEpisodes.toString() : '';
-    this.progressText = toTime(item.progressSeconds);
+    this.progressText = item.progressSeconds > 0 ? toTime(item.progressSeconds) : '';
     this.durationText = item.durationSeconds > 0 ? toTime(item.durationSeconds) : '';
+    this.coverUrl = typeof item.coverUrl === 'string' ? item.coverUrl : '';
     this.note = item.note;
     this.completed = item.completed;
     this.titleHint = '';
@@ -948,20 +1240,40 @@ struct Index {
     await this.repository.save(this.videos);
     const context = this.getUIContext().getHostContext();
     if (context) {
-      await refreshAllWatchingForms(context);
+      await refreshAllWatchingForms(context, this.videos);
     }
   }
 
   async saveVideo(): Promise<void> {
-    if (this.title.trim().length === 0 || this.url.trim().length === 0) {
+    const parsed = parseShareText(this.url.length > 0 ? this.url : this.title);
+    const finalUrl = parsed.url.length > 0 ? parsed.url : this.url.trim();
+    const finalTitle = this.title.trim().length > 0 ? this.title.trim() : parsed.title;
+    if (finalTitle.length === 0 || finalUrl.length === 0) {
       return;
     }
+    if (this.coverUrl.length === 0 || this.durationText.trim().length === 0) {
+      try {
+        const meta = await resolveVideoMeta(finalUrl);
+        if (this.coverUrl.length === 0 && meta.coverUrl.length > 0) {
+          this.coverUrl = meta.coverUrl;
+        }
+        if (this.durationText.trim().length === 0 && meta.durationSeconds > 0) {
+          this.durationText = toTime(meta.durationSeconds);
+        }
+        if (this.progressText.trim().length === 0 && meta.progressSeconds > 0) {
+          this.progressText = toTime(meta.progressSeconds);
+        }
+      } catch (metaError) {
+      }
+    }
     const now = Date.now();
+    const detected = detectPlatform(`${finalUrl} ${finalTitle}`);
     const item: VideoItem = {
       id: this.editingId || `${now}`,
-      title: this.title.trim(),
-      url: this.url.trim(),
-      platform: this.platform === 'å…¶ä»–' ? detectPlatform(this.url) : this.platform,
+      title: finalTitle,
+      url: finalUrl,
+      coverUrl: normalizeCoverUrl(this.coverUrl),
+      platform: detected !== 'å…¶ä»–' ? detected : this.platform,
       episode: Number(this.episodeText) || 0,
       totalEpisodes: Number(this.totalEpisodesText) || 0,
       progressSeconds: parseTime(this.progressText),
@@ -987,12 +1299,34 @@ struct Index {
     await this.persist();
   }
 
+  confirmRemove(item: VideoItem): void {
+    this.getUIContext().showAlertDialog({
+      title: 'ç¡®è®¤åˆ é™¤',
+      message: `ç¡®å®šåˆ é™¤ã€Œ${item.title}ã€å—ï¼Ÿåˆ é™¤åŽæ— æ³•æ¢å¤ã€‚`,
+      autoCancel: true,
+      primaryButton: {
+        value: 'å–æ¶ˆ',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: 'åˆ é™¤',
+        fontColor: '#C53B3B',
+        action: () => {
+          this.removeVideo(item.id);
+        }
+      }
+    });
+  }
+
   async openWatch(item: VideoItem): Promise<void> {
     const context = this.getUIContext().getHostContext();
     if (!context) {
       return;
     }
-    await openVideoLink(context as common.UIAbilityContext, item.url);
+    const detected = detectPlatform(item.url);
+    const platform = detected !== 'å…¶ä»–' ? detected : item.platform;
+    await openVideoLink(context as common.UIAbilityContext, item.url, platform, item.progressSeconds);
   }
 
   @Builder
@@ -1008,56 +1342,67 @@ struct Index {
   @Builder
   VideoCard(item: VideoItem) {
     Column({ space: 10 }) {
-      Column({ space: 10 }) {
-        Row() {
-          Text(item.platform)
-            .fontSize(12)
-            .fontColor('#2F6BFF')
-            .backgroundColor('#E8F0FF')
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .borderRadius(8)
-          Blank()
-          Text(item.completed ? 'å·²çœ‹å®Œ' : 'åœ¨è¿½')
-            .fontSize(12)
-            .fontColor(item.completed ? '#25885A' : '#C46A00')
-        }.width('100%')
-        Text(item.title)
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-        Text(item.episode > 0 ? `ç¬¬ ${item.episode} é›†${item.totalEpisodes > 0 ? ` / å…± ${item.totalEpisodes} é›†` : ''}` : 'å•é›†æˆ–æœªå¡«å†™é›†æ•°')
-          .fontSize(14)
-          .fontColor('#637083')
-          .width('100%')
-        if (item.durationSeconds > 0) {
-          Progress({
-            value: Math.min(item.progressSeconds, item.durationSeconds),
-            total: item.durationSeconds,
-            type: ProgressType.Linear
-          }).color('#2F6BFF').backgroundColor('#E6EAF0').width('100%')
-        }
-        Text(`è¿›åº¦ ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`)
-          .fontSize(14)
-          .fontColor('#3E4B5F')
-          .width('100%')
-        if (item.note.length > 0) {
-          Text(item.note)
-            .fontSize(13)
-            .fontColor('#7B8798')
-            .maxLines(1)
+      Row({ space: 12 }) {
+        CoverThumb({
+          cover: normalizeCoverUrl(item.coverUrl),
+          platform: item.platform,
+          thumbWidth: 84,
+          thumbHeight: 112,
+          radius: 10,
+          fontSize: 11
+        })
+        Column({ space: 8 }) {
+          Row() {
+            Text(item.platform)
+              .fontSize(12)
+              .fontColor('#2F6BFF')
+              .backgroundColor('#E8F0FF')
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(8)
+            Blank()
+            Text(item.completed ? 'å·²çœ‹å®Œ' : 'åœ¨è¿½')
+              .fontSize(12)
+              .fontColor(item.completed ? '#25885A' : '#C46A00')
+          }.width('100%')
+          Text(item.title)
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-        }
+          Text(item.episode > 0 ? `ç¬¬ ${item.episode} é›†${item.totalEpisodes > 0 ? ` / å…± ${item.totalEpisodes} é›†` : ''}` : 'å•é›†æˆ–æœªå¡«å†™é›†æ•°')
+            .fontSize(14)
+            .fontColor('#637083')
+            .width('100%')
+          if (item.progressSeconds > 0) {
+            if (item.durationSeconds > 0) {
+              Progress({
+                value: Math.min(item.progressSeconds, item.durationSeconds),
+                total: item.durationSeconds,
+                type: ProgressType.Linear
+              }).color('#2F6BFF').backgroundColor('#E6EAF0').width('100%')
+            }
+            Text(`è¿›åº¦ ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`)
+              .fontSize(14)
+              .fontColor('#3E4B5F')
+              .width('100%')
+          }
+          if (item.note.length > 0) {
+            Text(item.note)
+              .fontSize(13)
+              .fontColor('#7B8798')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+        }.layoutWeight(1)
       }
       .width('100%')
       .onClick(() => this.openWatch(item))
 
       Row({ space: 8 }) {
-        Button('ç»§ç»­è§‚çœ‹').layoutWeight(1).onClick(() => this.openWatch(item))
         Button('æ›´æ–°è¿›åº¦').layoutWeight(1).onClick(() => this.editVideo(item))
-        Button('åˆ é™¤').fontColor('#C53B3B').backgroundColor('#FFF0F0').onClick(() => this.removeVideo(item.id))
+        Button('åˆ é™¤').fontColor('#C53B3B').backgroundColor('#FFF0F0').onClick(() => this.confirmRemove(item))
       }.width('100%')
     }
     .padding(16)
@@ -1100,7 +1445,7 @@ struct Index {
                 this.VideoCard(item)
               }
             }, (item: VideoItem) => item.id)
-          }.layoutWeight(1).width('100%')
+          }.layoutWeight(1).width('100%').padding({ bottom: 56 }).scrollBar(BarState.Off)
         }
       }.padding(20).height('100%').backgroundColor('#F7F9FC')
       Button('+ æ·»åŠ è§†é¢‘')
@@ -1109,28 +1454,49 @@ struct Index {
         .backgroundColor('#2F6BFF')
         .borderRadius(24)
         .padding({ left: 20, right: 20 })
-        .margin(24)
+        .margin({ left: 20, right: 20, bottom: 16 })
         .onClick(() => this.newVideo())
     }
     .height('100%')
-    .bindSheet($$this.showEditor, this.EditorSheet(), { height: 620, showClose: true })
+    .bindSheet($$this.showEditor, this.EditorSheet(), {
+      height: 680,
+      showClose: true,
+      dragBar: true,
+      title: this.editorSheetTitle()
+    })
+  }
+
+  editorSheetTitle(): SheetTitleOptions {
+    const options: SheetTitleOptions = {
+      title: this.editingId.length > 0 ? 'æ›´æ–°è¿›åº¦' : 'æ·»åŠ è§†é¢‘'
+    };
+    return options;
   }
 
   @Builder
   EditorSheet() {
     Scroll() {
       Column({ space: 14 }) {
-        TextInput({ placeholder: 'è§†é¢‘æ ‡é¢˜ï¼ˆç²˜è´´é“¾æŽ¥åŽè‡ªåŠ¨å¡«å……ï¼‰', text: this.title })
-          .onChange((value: string) => {
-            this.title = value;
-            this.titleFromLink = false;
-          })
-        TextInput({ placeholder: 'ç²˜è´´è§†é¢‘é“¾æŽ¥ï¼ˆå¿…å¡«ï¼‰', text: this.url })
+        TextInput({ placeholder: 'è§†é¢‘æ ‡é¢˜ï¼ˆå¯ç²˜è´´åˆ†äº«å£ä»¤ï¼‰', text: this.title })
+          .onChange((value: string) => this.handleTitleChange(value))
+        TextInput({ placeholder: 'ç²˜è´´åˆ†äº«å†…å®¹æˆ–é“¾æŽ¥ï¼ˆå¿…å¡«ï¼‰', text: this.url })
           .onChange((value: string) => this.handleUrlChange(value))
-        Text(`å¹³å°ï¼š${this.platform}`)
-          .fontSize(14)
+        Text('å¹³å°æ ‡ç­¾')
+          .fontSize(13)
           .fontColor('#637083')
           .width('100%')
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(PLATFORMS, (name: Platform) => {
+            Text(name)
+              .fontSize(12)
+              .fontColor(this.platform === name ? Color.White : '#2F6BFF')
+              .backgroundColor(this.platform === name ? '#2F6BFF' : '#E8F0FF')
+              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 8, bottom: 8 })
+              .onClick(() => this.platform = name)
+          }, (name: Platform) => name)
+        }.width('100%')
         if (this.titleHint.length > 0) {
           Text(this.titleHint)
             .fontSize(12)
@@ -1168,151 +1534,217 @@ struct Index {
           .backgroundColor('#2F6BFF')
           .width('100%')
           .onClick(() => this.saveVideo())
-      }.padding({ left: 20, right: 20, top: 10, bottom: 32 }).width('100%')
+      }.padding({ left: 20, right: 20, top: 24, bottom: 36 }).width('100%')
     }
   }
 }
-ÀÔrD•µ../data/VideoLauncher²../model/VideoItem·../data/VideoRepositoryµ../data/TitleResolver³../data/FormUpdaterÔrE—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ5E:\new-chat\entry\src\main\ets\data\VideoLauncher.etsAÃªoh-resolveÂEAÂÙ2E:\new-chat\entry\src\main\ets\model\VideoItem.etsAÃªoh-resolveÂEAÂÙ7E:\new-chat\entry\src\main\ets\data\VideoRepository.etsAÃªoh-resolveÂEAÂÙ5E:\new-chat\entry\src\main\ets\data\TitleResolver.etsAÃªoh-resolveÂEAÂÙ3E:\new-chat\entry\src\main\ets\data\FormUpdater.etsAÃªoh-resolveÂ“ÔrF–§version¤fileªsourceRoot§sources¥names¨mappings¨Index.js ‘©Index.etsÜœ”   ” ”	 ” ,” .”" 7”$ 9”* ?”, ÌA”2 ÌG”ÌF Ì[”ÌG Ì\˜”   ” ”	 	” ” ”   ”9 9”: :˜”   ” ”	 	” ” ”" "”9 9”: :˜”   ” ”	 	” ” ” ”5 5”6 6˜”   ” ”	 	”   ”" "”( (”= =”> >’” ” ‘” 	 ’”5 ”7 !’”5 ”9 ’”9 ”> $’”8 ”: ’”4 ”6 ’”2 ”4 ’”7 ”; "’”: ”< !’”Ì@ %”ÌB '’”;  ”ÌB '’”;  ”= "’”3 ”5 ’”8 ”= #’”= #”ÌB (’”8 ”: ’”< "”ÌA '’” ”  “” ”  ” !‘” "’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’”  ”  œ” !” !
-” !” !” !” !”) !%”+ !'”, !(”: !6”< !8”= !9•” "” "” "	” "” "’” #” #‘”	 $›” %” %” %	” %” %” %”- %)”. %*”5 %1”6 %2”7 %3Ü ” &” &” &	” &” &” &” &” &”" &”$ & ”% &!”< &8”= &9”ÌD &Ì@”ÌE &ÌA”ÌF &ÌB”ÌG &ÌC”ÌL &ÌH”ÌM &ÌI”ÌP &ÌL”ÌR &ÌN”” '”	 '”
- '” '’” (” (”” *”	 *”
- *” *—” +” +” +	” +” +” +” +’” ,” ,‘”	 -Ü !” .” .” .	” .” .” .” .”! .”" .”, .(”- .)”1 .-”3 ./”4 .0”5 .1”9 .5”: .6”; .7”< .ÌC”> .ÌE”? .ÌQ”ÌA .ÌS”ÌC .ÌU”ÌD .ÌV”ÌE .ÌW”ÌF .ÌX”ÌO .Ìa”ÌR .Ìd”ÌS .Ìe”ÌT .Ìf”Ì] .Ìo”Ì^ .Ìp”Ì_ .Ìq’” /” /’” 1” 1˜” 2” 2” 2” 2” 2” 2”  2”" 2Ü ” 3” 3” 3” 3” 3” 3”% 3”& 3 ”' 3!”+ 30”- 32”/ 34”0 35”1 36”5 3:”6 3;”? 3ÌD”Ì@ 3ÌE”ÌA 3ÌF‘”	 4˜” 5” 5” 5” 5” 5” 5”! 5”# 5Ü ” 6” 6” 6” 6” 6” 6”% 6”& 6 ”' 6!”+ 60”- 62”/ 64”0 65”4 69”5 6:”> 6ÌC”? 6ÌD”Ì@ 6ÌE‘”	 7–” 8” 8” 8” 8” 8” 8’” 9” 9”” ;” ;” ;” ;—” <” <” <	” <” <” <” <š” =” =” =	” =” =”& ="”' =#”, =(”- =)”. =*˜” >” >” >” >” >” >”  >”" >˜” ?” ?” ?” ?” ?”( ?"”) ?#”* ?$˜” Ì@” Ì@
-” Ì@” Ì@” Ì@” Ì@”  Ì@”! Ì@‘”	 ÌA™” ÌB” ÌB
-” ÌB” ÌB” ÌB” ÌB”" ÌB”$ ÌB ”% ÌB!š” ÌC” ÌC” ÌC	” ÌC” ÌC”! ÌC”" ÌC”) ÌC%”* ÌC&”, ÌC(—” ÌD” ÌD
-” ÌD” ÌD”" ÌD”' ÌD!”( ÌD"—” ÌE” ÌE
-” ÌE” ÌE” ÌE” ÌE”  ÌE’” ÌF” ÌF‘”	 ÌGÜ ” ÌH” ÌH” ÌH” ÌH” ÌH” ÌH” ÌH” ÌH” ÌH”$ ÌH ”' ÌH#”( ÌH$”, ÌH(”- ÌH)”1 ÌH-”2 ÌH.”? ÌH;”ÌA ÌH=—” ÌI” ÌI
-” ÌI” ÌI”" ÌI”' ÌI!”( ÌI"’” ÌJ” ÌJ‘”	 ÌK™” ÌL” ÌL
-” ÌL” ÌL” ÌL” ÌL” ÌL”' ÌL#”( ÌL$—” ÌM” ÌM” ÌM	” ÌM” ÌM”" ÌM”# ÌM—” ÌN” ÌN” ÌN	” ÌN” ÌN”" ÌN”# ÌN™” ÌO” ÌO” ÌO	” ÌO” ÌO”$ ÌO ”% ÌO!”( ÌO$”* ÌO&š” ÌP” ÌP
-” ÌP” ÌP” ÌP”# ÌP”% ÌP”* ÌP$”+ ÌP%”, ÌP&–” ÌQ”	 ÌQ” ÌQ” ÌQ
-” ÌQ” ÌQ’” ÌR” ÌR˜” ÌT”	 ÌT”
- ÌT” ÌT” ÌT” ÌT” ÌT ” ÌT-’” ÌU” ÌUš” ÌV” ÌV” ÌV”" ÌV”( ÌV"”9 ÌV3”: ÌV4”= ÌV7”> ÌV8”? ÌV9Ü ” ÌW” ÌW
-” ÌW” ÌW” ÌW” ÌW”) ÌW#”- ÌW'”1 ÌW+”2 ÌW,”5 ÌW/”6 ÌW0”: ÌW4”< ÌW6”ÌA ÌW;”ÌD ÌW>”ÌF ÌWÌ@’” ÌX” ÌX‘” ÌYÜ ” ÌZ” ÌZ
-” ÌZ” ÌZ”$ ÌZ”' ÌZ!”( ÌZ"”, ÌZ&”- ÌZ'”1 ÌZ+”2 ÌZ,”7 ÌZ1”8 ÌZ2”< ÌZ6”> ÌZ8”? ÌZ9”ÌE ÌZ?”ÌJ ÌZÌD”ÌK ÌZÌE”ÌO ÌZÌI”ÌS ÌZÌM”ÌT ÌZÌN”Ìa ÌZÌ[”Ìb ÌZÌ\”Ìd ÌZÌ^—” Ì[” Ì[” Ì[” Ì[” Ì[”* Ì["”+ Ì[#—” Ì\” Ì\” Ì\”" Ì\”% Ì\”) Ì\!”* Ì\"—” Ì]” Ì]” Ì]” Ì]”! Ì]”1 Ì])”2 Ì]*›” Ì^” Ì^”" Ì^”% Ì^”2 Ì^*”3 Ì^+”8 Ì^0”9 Ì^1”ÌH Ì^Ì@”ÌI Ì^ÌA”ÌJ Ì^ÌBÜ ” Ì_” Ì_”  Ì_”$ Ì_”0 Ì_(”1 Ì_)”2 Ì_*”3 Ì_+”7 Ì_/”; Ì_3”< Ì_4”ÌG Ì_?”ÌH Ì_Ì@”ÌN Ì_ÌF”ÌS Ì_ÌK”ÌT Ì_ÌL”ÌV Ì_ÌNš” Ì`
-” Ì`” Ì`”$ Ì`”' Ì`”3 Ì`)”4 Ì`*”5 Ì`+”6 Ì`,”7 Ì`-‘” Ìa	‘” Ìb‘” Ìb—” Ìc” Ìc” Ìc” Ìc”! Ìc”1 Ìc)”2 Ìc*‘” Ìd‘”	 Ìe”” Ìe” Ìe” Ìe” Ìe˜” Ìf” Ìf
-” Ìf” Ìf” Ìf” Ìf”) Ìf#”+ Ìf%—” Ìg” Ìg” Ìg” Ìg”! Ìg”/ Ìg'”0 Ìg(‘” Ìh‘”	 Ìi‘” Ìi˜” Ìj” Ìj
-” Ìj” Ìj” Ìj” Ìj”) Ìj#”+ Ìj%—” Ìk” Ìk” Ìk”# Ìk”& Ìk”+ Ìk#”, Ìk$‘” Ìl‘”	 Ìm’” Ìn” Ìn’” Ìp” Ìp
-—” Ìq” Ìq” Ìq	” Ìq” Ìq” Ìq” Ìq—” Ìr” Ìr” Ìr	” Ìr” Ìr” Ìr” Ìr—” Ìs” Ìs” Ìs	” Ìs” Ìs” Ìs” Ìs—” Ìt” Ìt” Ìt	” Ìt” Ìt” Ìt” Ìt—” Ìu” Ìu” Ìu	” Ìu” Ìu” Ìu” Ìu—” Ìv” Ìv” Ìv	” Ìv”! Ìv”# Ìv”$ Ìv —” Ìw” Ìw” Ìw	” Ìw” Ìw”# Ìw”$ Ìw —” Ìx” Ìx” Ìx	” Ìx” Ìx” Ìx” Ìx—” Ìy” Ìy” Ìy	” Ìy” Ìy” Ìy” Ìy—” Ìz” Ìz” Ìz	” Ìz” Ìz” Ìz” Ìz—” Ì{” Ì{” Ì{	” Ì{” Ì{” Ì{” Ì{—” Ì|” Ì|” Ì|	” Ì|” Ì|”" Ì|”# Ì|—” Ì}” Ì}” Ì}	” Ì}” Ì}”# Ì}”$ Ì} —” Ì~” Ì~” Ì~	” Ì~” Ì~” Ì~” Ì~’” Ì” Ì”” Ì” Ì” Ì” Ì™” Ì‚” Ì‚” Ì‚	” Ì‚” Ì‚” Ì‚” Ì‚”  Ì‚”! Ì‚™” Ìƒ” Ìƒ” Ìƒ	” Ìƒ” Ìƒ” Ìƒ” Ìƒ” Ìƒ”  Ìƒ™” Ì„” Ì„” Ì„	” Ì„” Ì„” Ì„” Ì„” Ì„” Ì„™” Ì…” Ì…” Ì…	” Ì…” Ì…” Ì…” Ì…”% Ì…!”& Ì…"Ü ” Ì†” Ì†” Ì†	” Ì†” Ì†” Ì†”  Ì†”' Ì†#”* Ì†&”+ Ì†'”, Ì†(”- Ì†)”. Ì†*”2 Ì†.”3 Ì†/”: Ì†6”; Ì†7”ÌC Ì†?”ÌE Ì†ÌA”ÌF Ì†ÌB”ÌG Ì†ÌC”ÌH Ì†ÌD”ÌJ Ì†ÌF”ÌK Ì†ÌGÜ ” Ì‡” Ì‡” Ì‡	” Ì‡”! Ì‡”% Ì‡!”& Ì‡"”3 Ì‡/”6 Ì‡2”7 Ì‡3”8 Ì‡4”9 Ì‡5”: Ì‡6”> Ì‡:”? Ì‡;”ÌL Ì‡ÌH”ÌM Ì‡ÌI”ÌU Ì‡ÌQ”ÌW Ì‡ÌS”ÌX Ì‡ÌT”ÌY Ì‡ÌU”ÌZ Ì‡ÌV”Ì\ Ì‡ÌX”Ì] Ì‡ÌYœ” Ìˆ” Ìˆ” Ìˆ	” Ìˆ” Ìˆ”" Ìˆ”# Ìˆ”' Ìˆ#”( Ìˆ$”7 Ìˆ3”8 Ìˆ4”9 Ìˆ5Ü ” Ì‰” Ì‰” Ì‰	” Ì‰” Ì‰”  Ì‰”! Ì‰”0 Ì‰,”3 Ì‰/”4 Ì‰0”5 Ì‰1”6 Ì‰2”7 Ì‰3”= Ì‰9”> Ì‰:”ÌB Ì‰>”ÌC Ì‰?”ÌR Ì‰ÌN”ÌS Ì‰ÌO”ÌT Ì‰ÌP”ÌU Ì‰ÌQ”ÌV Ì‰ÌR”ÌX Ì‰ÌT”ÌY Ì‰ÌU™” ÌŠ” ÌŠ” ÌŠ	” ÌŠ” ÌŠ” ÌŠ” ÌŠ” ÌŠ” ÌŠ™” Ì‹” Ì‹” Ì‹	” Ì‹” Ì‹” Ì‹” Ì‹”' Ì‹#”( Ì‹$—” ÌŒ” ÌŒ” ÌŒ	” ÌŒ” ÌŒ” ÌŒ” ÌŒ—” Ì” Ì” Ì	” Ì” Ì”" Ì”# Ì—” ÌŽ” ÌŽ” ÌŽ	” ÌŽ” ÌŽ”# ÌŽ”$ ÌŽ —” Ì” Ì” Ì	” Ì” Ì” Ì” Ì’” Ì” Ì”” Ì’”	 Ì’”
- Ì’” Ì’—” Ì“” Ì“” Ì“	” Ì“” Ì“” Ì“” Ì“’” Ì”” Ì”‘”	 Ì•Ü ” Ì–” Ì–” Ì–	” Ì–” Ì–” Ì–” Ì–” Ì–” Ì–"” Ì–$” Ì–0”  Ì–2”" Ì–4”# Ì–5”$ Ì–6”% Ì–7”. Ì–Ì@”1 Ì–ÌC”2 Ì–ÌD”3 Ì–ÌE”< Ì–ÌN”= Ì–ÌO”> Ì–ÌP” Ì—” Ì—
-” Ì—” Ì—” Ì—” Ì—”" Ì—”# Ì—”' Ì—#”( Ì—$”. Ì—*”/ Ì—+”0 Ì—,œ” Ì˜” Ì˜
-” Ì˜” Ì˜” Ì˜” Ì˜”) Ì˜%”+ Ì˜'”, Ì˜(”: Ì˜6”< Ì˜8”= Ì˜9”” Ì™” Ì™” Ì™” Ì™—” Ìš” Ìš”) Ìš#”* Ìš$”1 Ìš+”2 Ìš,”3 Ìš-‘”	 Ì›’” Ìœ” Ìœ”” Ìž”	 Ìž”
- Ìž” ÌžÜ ” ÌŸ” ÌŸ” ÌŸ” ÌŸ” ÌŸ” ÌŸ” ÌŸ” ÌŸ” ÌŸ”$ ÌŸ ”) ÌŸ%”* ÌŸ&”. ÌŸ*”2 ÌŸ.”3 ÌŸ/”6 ÌŸ2”7 ÌŸ3”; ÌŸ7”= ÌŸ9”> ÌŸ:”ÌD ÌŸÌ@”ÌI ÌŸÌE”ÌJ ÌŸÌF”ÌL ÌŸÌH’” Ì ” Ì ‘”	 Ì¡™” Ì¢” Ì¢
-” Ì¢” Ì¢” Ì¢” Ì¢” Ì¢” Ì¢” Ì¢”” Ì£” Ì£
-” Ì£” Ì£š” Ì¤” Ì¤” Ì¤
-” Ì¤” Ì¤” Ì¤”" Ì¤”% Ì¤”( Ì¤"”* Ì¤$™” Ì¥” Ì¥” Ì¥” Ì¥” Ì¥” Ì¥” Ì¥”" Ì¥”$ Ì¥™” Ì¦” Ì¦	” Ì¦” Ì¦” Ì¦” Ì¦” Ì¦” Ì¦”  Ì¦Ü ” Ì§” Ì§” Ì§” Ì§” Ì§”# Ì§”( Ì§"”, Ì§&”- Ì§'”. Ì§(”/ Ì§)”= Ì§7”> Ì§8”ÌB Ì§<”ÌC Ì§=”ÌF Ì§Ì@”ÌG Ì§ÌA”ÌH Ì§ÌB”ÌI Ì§ÌC”ÌJ Ì§ÌD”ÌN Ì§ÌH”ÌO Ì§ÌI”ÌW Ì§ÌQ›” Ì¨” Ì¨” Ì¨” Ì¨” Ì¨”  Ì¨”! Ì¨”, Ì¨&”- Ì¨'”1 Ì¨+”2 Ì¨,›” Ì©” Ì©” Ì©”! Ì©”" Ì©”& Ì© ”' Ì©!”8 Ì©2”9 Ì©3”= Ì©7”> Ì©8™” Ìª” Ìª” Ìª”& Ìª ”' Ìª!”+ Ìª%”, Ìª&”8 Ìª2”9 Ìª3™” Ì«” Ì«” Ì«”& Ì« ”' Ì«!”+ Ì«%”, Ì«&”8 Ì«2”9 Ì«3™” Ì¬” Ì¬
-” Ì¬” Ì¬” Ì¬” Ì¬” Ì¬”  Ì¬”" Ì¬–” Ì­” Ì­” Ì­” Ì­” Ì­”% Ì­”” Ì®” Ì®” Ì®” Ì®”” Ì¯” Ì¯” Ì¯” Ì¯”” Ì°” Ì°” Ì°” Ì°’”	 Ì±”
- Ì±Ü ” Ì²” Ì²
-” Ì²” Ì²” Ì²” Ì²”! Ì²”" Ì²”+ Ì²'”, Ì²(”- Ì²)”2 Ì²9”4 Ì²;”6 Ì²=”7 Ì²>”< Ì²ÌC”= Ì²ÌD”? Ì²ÌF”ÌD Ì²ÌK”ÌH Ì²ÌO”ÌI Ì²ÌP”ÌK Ì²ÌR”ÌL Ì²ÌS”ÌM Ì²ÌT–” Ì³” Ì³” Ì³” Ì³” Ì³” Ì³š” Ì´” Ì´
-” Ì´” Ì´” Ì´” Ì´” Ì´”! Ì´”% Ì´”& Ì´ ‘”	 Ìµ‘” Ìµš” Ì¶” Ì¶
-” Ì¶” Ì¶” Ì¶” Ì¶” Ì¶”! Ì¶”" Ì¶”# Ì¶‘”	 Ì·—” Ì¸” Ì¸
-” Ì¸” Ì¸” Ì¸” Ì¸” Ì¸—” Ì¹” Ì¹” Ì¹	” Ì¹” Ì¹” Ì¹”  Ì¹’” Ìº” Ìº–” Ì¼”	 Ì¼”
- Ì¼” Ì¼” Ì¼” Ì¼Ü ” Ì½” Ì½” Ì½	” Ì½” Ì½” Ì½” Ì½”! Ì½”" Ì½”( Ì½$”) Ì½%”* Ì½&”. Ì½5”0 Ì½7”2 Ì½9”3 Ì½:”7 Ì½>”8 Ì½?”: Ì½ÌA”? Ì½ÌF”ÌA Ì½ÌH”ÌB Ì½ÌI”ÌC Ì½ÌJ—” Ì¾” Ì¾
-” Ì¾” Ì¾” Ì¾” Ì¾” Ì¾’” Ì¿” Ì¿–” ÌÁ”	 ÌÁ”
- ÌÁ” ÌÁ” ÌÁ” ÌÁ!œ” ÌÂ” ÌÂ
-” ÌÂ” ÌÂ” ÌÂ” ÌÂ”) ÌÂ%”+ ÌÂ'”, ÌÂ(”: ÌÂ6”< ÌÂ8”= ÌÂ9•” ÌÃ” ÌÃ” ÌÃ	” ÌÃ” ÌÃ’” ÌÄ” ÌÄ‘”	 ÌÅ›” ÌÆ” ÌÆ
-” ÌÆ” ÌÆ”# ÌÆ:”% ÌÆ<”) ÌÆÌ@”* ÌÆÌA”- ÌÆÌD”. ÌÆÌE”/ ÌÆÌF’” ÌÇ” ÌÇ”” ÌÊ” ÌÊ” ÌÊ” ÌÊ”” ÌË” ÌË
-”# ÌË”' ÌËÜ ” ÌË” ÌË
-” ÌÌ” ÌÌ” ÌÌ”! ÌÌ”" ÌÌ”( ÌÌ”- ÌÌ!”1 ÌÌ%”2 ÌÌ&”3 ÌÌ'”4 ÌÌ(”9 ÌÌ-”: ÌÌ.”? ÌÌ3”Ì@ ÌÌ4”ÌA ÌÌ5”ÌB ÌÌ6”ÌK ÌÌ?Ü ” ÌË” ÌË
-” ÌÍ”" ÌÍ”# ÌÍ”' ÌÍ”( ÌÍ”. ÌÍ"”3 ÌÍ'”7 ÌÍ+”8 ÌÍ,”9 ÌÍ-”: ÌÍ.”ÌC ÌÍ7”ÌD ÌÍ8”ÌE ÌÍ9”ÌF ÌÍ:”ÌO ÌÍÌC–” ÌË” ÌË
-” ÌÎ” ÌÎ”  ÌÎ”" ÌÎ–” ÌË” ÌË
-” ÌÏ” ÌÏ” ÌÏ” ÌÏ” ÌË” ÌË
-” ÌÐ” ÌÐ” ÌÐ” ÌÐ”  ÌÐ”! ÌÐ”% ÌÐ”& ÌÐ”, ÌÐ ”/ ÌÐ#”3 ÌÐ'’” ÌË” ÌË
-‘” ÌÑ”” ÌÔ” ÌÔ” ÌÔ” ÌÔ˜” ÌÕ” ÌÕ
-” ÌÕ” ÌÕ”! ÌÕ”# ÌÕ”% ÌÕ”' ÌÕ–” ÌÕ” ÌÕ
-” Í
-” Í
-” Í
-” Í
-˜” ÌÕ” ÌÕ
-” Í”" Í”# Í”( Í”) Í”. Í –” ÌÕ” ÌÕ
-” Í” Í”  Í”" ÍÜ ” ÌÕ” ÌÕ
-” Í” Í” Í” Í”" Í”$ Í”& Í”( Í”- Í”/ Í!”: Í,”< Í.”ÌC Í5”ÌE Í7”ÌF Í8”ÌH Í:”ÌO ÍÌA”ÌQ ÍÌC”ÌR ÍÌD”ÌT ÍÌF–” ÌÕ” ÌÕ
-” Í” Í
-” Í” Í˜” ÌÖ” ÌÖ” ÌÖ” ÌÖ”! ÌÖ”# ÌÖ”% ÌÖ”' ÌÖ–” ÌÖ” ÌÖ” Í” Í” Í” Íž” ÌÖ” ÌÖ” Í” Í” Í” Í”  Í”! Í”% Í”& Í”/ Í#”0 Í$”4 Í(”5 Í)’” Ì×” Ì×–” Ì×” Ì×” Ìâ
-” Ìâ” Ìâ” Ìâ–” ÌØ
-” ÌØ” ÌØ” ÌØ” ÌØ”% ÌØ–” ÌØ
-” ÌØ” ÌÙ” ÌÙ” ÌÙ” ÌÙ–” ÌØ
-” ÌØ” ÌÚ” ÌÚ” ÌÚ”$ ÌÚ –” ÌØ
-” ÌØ” ÌÛ”  ÌÛ”! ÌÛ”* ÌÛ&Ü ” ÌØ
-” ÌØ” ÌÜ” ÌÜ” ÌÜ” ÌÜ” ÌÜ”! ÌÜ”" ÌÜ”$ ÌÜ ”) ÌÜ%”+ ÌÜ'”, ÌÜ(”. ÌÜ*”1 ÌÜ-”3 ÌÜ/”4 ÌÜ0”6 ÌÜ2”< ÌÜ8”> ÌÜ:”? ÌÜ;”ÌA ÌÜ=–” ÌØ
-” ÌØ” ÌÝ” ÌÝ” ÌÝ” ÌÝ’” ÌØ
-” ÌØ’” ÌÞ
-” ÌÞ’” ÌÞ
-” ÌÞž” Ìß
-” Ìß” Ìß” Ìß” Ìß”& Ìß”' Ìß”( Ìß”) Ìß ”. Ìß%”/ Ìß&”0 Ìß'”1 Ìß(”5 Ìß,–” Ìß
-” Ìß” Ìà” Ìà” Ìà” ÌàÜ ” Ìß
-” Ìß” Ìá” Ìá” Ìá” Ìá”  Ìá”) Ìá%”* Ìá&”+ Ìá'”, Ìá(”5 Ìá1”6 Ìá2”7 Ìá3”8 Ìá4”ÌA Ìá=’” Ìß
-” Ìß’” Ì×” Ì×–” Ìã” Ìã” Ìã” Ìã” Ìã”" Ìã–” Ìã” Ìã” Ìä” Ìä” Ìä” Ìä˜” Ìã” Ìã” Ìå” Ìå” Ìå”& Ìå ”' Ìå!”- Ìå'–” Ìã” Ìã” Ìæ” Ìæ” Ìæ” Ìæœ” Ìã” Ìã” Ìç” Ìç” Ìç”  Ìç”( Ìç"”* Ìç$”6 Ìç0”7 Ìç1”? Ìç9”ÌA Ìç;–” Ìã” Ìã” Ìè” Ìè” Ìè” Ìè’” Ìã” ÌãÜ &” Ìé” Ìé” Ìé” Ìé” Ìé”$ Ìé”' Ìé”( Ìé”) Ìé”* Ìé”+ Ìé ”0 Ìé%”4 Ìé)”5 Ìé*”< Ìé1”ÌA Ìé6”ÌE Ìé:”ÌF Ìé;”ÌS ÌéÌH”ÌV ÌéÌK”ÌW ÌéÌL”ÌX ÌéÌM”ÌY ÌéÌN”ÌZ ÌéÌO”Ìb ÌéÌW”Ìf ÌéÌ[”Ìg ÌéÌ\”Ìt ÌéÌi”Ìx ÌéÌm”Ìy ÌéÌn”Ìz ÌéÌo”Ì{ ÌéÌp”Ì} ÌéÌr”Ì ÌéÌt”Ì€ ÌéÌu”Ì ÌéÌv”Ì‚ ÌéÌw”ÌŒ ÌéÌ–” Ìé” Ìé” Ìê” Ìê” Ìê” Ìê–” Ìé” Ìé” Ìë” Ìë” Ìë”$ Ìë–” Ìé” Ìé” Ìì” Ìì” Ìì” Ìì’” Ìé” Ìé˜” Ìí” Ìí” Ìí” Ìí”$ Ìí ”' Ìí#”( Ìí$”* Ìí&“” Ìî
-”  Ìî”( ÌîŸ” Ìï”! Ìï”# Ìï”' Ìï”( Ìï”+ Ìï”, Ìï”0 Ìï ”1 Ìï!”Ì@ Ìï0”ÌB Ìï2”ÌF Ìï6”ÌG Ìï7”ÌV ÌïÌF”ÌW ÌïÌG–” Ìð”! Ìð”# Ìð”' Ìð”( Ìð”7 Ìð'–” Ìñ”  Ìñ”" Ìñ”. Ìñ”/ Ìñ”5 Ìñ%‘” Ìò–” Ìî
-”  Ìî”! Ìò”& Ìò”' Ìò”0 Ìò–” Ìî
-”  Ìî”! Ìò”0 Ìò-”1 Ìò.”: Ìò7–” Ìî
-”  Ìî”! Ìò9”& Ìò>”' Ìò?”- ÌòÌE‘” Ìó	‘” Ìó	Ü  ” Ìô” Ìô” Ìô” Ìô”$ Ìô”% Ìô”) Ìô”* Ìô”9 Ìô.”: Ìô/”= Ìô2”ÌA Ìô6”ÌB Ìô7”ÌQ ÌôÌF”ÌT ÌôÌI”ÌU ÌôÌJ”ÌV ÌôÌK”ÌW ÌôÌL”ÌX ÌôÌM”Ì^ ÌôÌS”Ìd ÌôÌY”Ìe ÌôÌZ”Ìi ÌôÌ^”Ìj ÌôÌ_”Ìy ÌôÌn”Ìz ÌôÌo”Ì| ÌôÌq”Ì} ÌôÌr”Ì~ ÌôÌs”Ì ÌôÌt”Ì ÌôÌv”Ìƒ ÌôÌx–” Ìô” Ìô” Ìõ” Ìõ” Ìõ” Ìõ–” Ìô” Ìô” Ìö” Ìö” Ìö”$ Ìö–” Ìô” Ìô” Ì÷” Ì÷” Ì÷” Ì÷’” Ìô” Ìôš” Ìø” Ìø” Ìø” Ìø” Ìø” Ìø”  Ìø”# Ìø”$ Ìø ”& Ìø"–” Ìù
-” Ìù”$ Ìù”( Ìù”) Ìù”- Ìù–” Ìù
-” Ìù” Ìú”% Ìú”& Ìú”( Ìú–” Ìù
-” Ìù” Ìû”& Ìû”' Ìû”0 Ìû –” Ìù
-” Ìù” Ìü”% Ìü”& Ìü”' Ìüœ” Ìù
-” Ìù” Ìý”) Ìý”* Ìý”, Ìý”4 Ìý$”6 Ìý&”ÌB Ìý2”ÌC Ìý3”ÌK Ìý;”ÌM Ìý=–” Ìù
-” Ìù” Ìþ”" Ìþ”# Ìþ”) Ìþ’” Ìù
-” Ìù‘” Ìÿ	‘” Ìÿ	’” ÌÖ” ÌÖ˜” Í” Í	” Í
-” Í” Í”  Í”! Í”# Í–” Í” Í	” Í” Í” Í” Í”” Í” Í”# Í”) Í–” Í” Í” Í” Í#”  Í$”! Í%ž” Í” Í” Í'” Í.” Í/” Í2”  Í4”! Í5”% Í9”& Í:”/ ÍÌC”0 ÍÌD”4 ÍÌH”5 ÍÌI’” Í” Í”” Í” Í”# Í”) Í–” Í” Í” Í” Í#”  Í$”! Í%ž” Í” Í” Í'” Í.” Í/” Í2”  Í4”! Í5”% Í9”& Í:”/ ÍÌC”0 ÍÌD”4 ÍÌH”5 ÍÌI’” Í” Í”” Í” Í”# Í”' Í–” Í” Í” Í” Í” Í”& Í(–” Í” Í” Í*”" Í9”# Í:”, ÍÌCÜ ” Í” Í” ÍÌE” ÍÌL” ÍÌM” ÍÌP”  ÍÌR”! ÍÌS”% ÍÌW”& ÍÌX”1 ÍÌc”2 ÍÌd”6 ÍÌh”7 ÍÌi”9 ÍÌk”: ÍÌl’” Í” Í’” Í” Í	’” ÌÕ” ÌÕ
-‘” Í‘” Íš” Í” Í	” Í
-” Í”' Í”) Í”2 Í#”3 Í$”< Í-”> Í/–” Í” Í	” Í>” Í>” Í>” Í>š” Í” Í	” Í?” Í?”% Í?”* Í?”4 Í? ”ÌQ Í?”ÌV Í?”Ì` Í? ”” Í?"” Í?&” Í?'”$ Í?2š” Í?6” Í?8” Í?>” Í?Ì@”" Í?ÌC”$ Í?ÌE”- Í?ÌN”/ Í?ÌP”3 Í?ÌT”5 Í?ÌV’” Í” Í–” Í” Í” Í4” Í4” Í4” Í4–” Í” Í” Í4” Í4” Í4”  Í4!–” Í” Í” Í4#”" Í42”# Í43”, Í4<’” Í” Í–” Í” Í” Í 
-” Í ” Í ” Í š” Í” Í” Í ” Í ” Í ” Í !” Í '”! Í )”# Í +”% Í -˜” Í
-” Í” Í” Í”! Í”# Í”$ Í”& Í˜” Í
-” Í” Í” Í” Í”- Í&”. Í'”3 Í,”” Í” Í” Í” Í–” Í” Í” Í” Í ” Í!” Í#˜” Í” Í” Í%” Í/” Í0”& Í:”' Í;”+ Í?’” Í” Í”” Í” Í” Í”( Í!–” Í” Í” Í#” Í+” Í,” Í.–” Í” Í” Í0” Í9” Í:”$ ÍÌC’” Í” Í’” Í
-” Í’” Í
-” Í’” Í
-” ÍÜ ” Í
-” Í” Í” Í” Í”  Í”& Í”' Í”- Í$”. Í%”/ Í&”3 Í5”5 Í7”7 Í9”8 Í:”9 Í;”= Í?”> ÍÌ@”ÌG ÍÌI”ÌH ÍÌJ”ÌI ÍÌK”ÌO ÍÌQ”ÌU ÍÌW–” Í
-” Í” Í” Í” Í” Í–” Í
-” Í” Í” Í” Í”$ Í –” Í
-” Í” Í”  Í”! Í”* Í&–” Í
-” Í” Í” Í” Í” Í–” Í
-” Í” Í” Í” Í”  Í’” Í
-” Í’” Í” Í˜” Í!” Í!” Í!” Í!” Í!”  Í!”! Í!”# Í!–” Í!” Í!” Í%
-” Í%” Í%” Í%š” Í!” Í!” Í%” Í%” Í%” Í%!” Í%'”! Í%)”# Í%+”% Í%-—” Í"
-” Í"” Í"” Í"”% Í"”) Í" ”* Í"!—” Í#
-” Í#” Í#” Í#”% Í#”) Í# ”* Í#!—” Í$
-” Í$” Í$” Í$”% Í$”* Í$!”+ Í$"’” Í!” Í!›” Í&” Í&” Í&” Í&”" Í&”$ Í& ”% Í&!”+ Í&'”0 Í&,”1 Í&-”3 Í&/˜” Í'
-” Í'”& Í'”( Í'”- Í'”/ Í'”1 Í'”3 Í'–” Í'
-” Í'” Í*”$ Í*”% Í*”+ Í*š” Í'
-” Í'” Í*”& Í*!”' Í*"”) Í*$”, Í*'”. Í*)”0 Í*+”2 Í*-˜” Í'
-” Í'” Í*/”) Í*9”* Í*:”9 Í*ÌI”: Í*ÌJ”Ì@ Í*ÌP”” Í(” Í(”$ Í(”+ Í(–” Í(” Í(” Í(”% Í("”& Í(#”( Í(%˜” Í(” Í(” Í('”' Í(1”( Í(2”2 Í(<”3 Í(=”9 Í(ÌC’” Í(” Í(”” Í)” Í)”$ Í)”; Í)(–” Í)” Í)” Í)*”% Í)2”& Í)3”( Í)5–” Í)” Í)” Í)7”& Í)Ì@”' Í)ÌA”0 Í)ÌJ’” Í)” Í)’” Í'
-” Í'‘” Í+	‘” Í+˜” Í,
-” Í,”$ Í,”& Í,”+ Í,”- Í,”/ Í,”1 Í,–” Í,
-” Í,” Í2”) Í2”* Í2”+ Í2–” Í,
-” Í,” Í2”" Í2!”# Í2"”) Í2(’” Í-” Í-’”( Í.”0 Í.—”$ Í/”( Í/”) Í/”2 Í/”> Í/”ÌB Í/#”ÌC Í/$’”$ Í.”, Í.’”  Í.”( Í.ž”; Í-”? Í-”Ì@ Í-”ÌM Í-&”ÌO Í-(”Ìi Í1”Ìj Í1”Ìn Í1”Ìp Í1!”Ìr Í1#”Ìs Í1$”Ìw Í1(”Ìx Í1)”Ìz Í1+’” Í-” Í-’” Í,
-” Í,‘” Í3	’” Í” Í”” Í5” Í5”# Í5”+ Í5–” Í5” Í5” Í6	” Í6” Í6” Í6˜” Í5” Í5” Í7	” Í7” Í7”" Í7”# Í7”( Í7–” Í5” Í5” Í8	”" Í8”# Í8”, Í8"–” Í5” Í5” Í9	” Í9”  Í9”" Í9ž” Í5” Í5” Í:	” Í:” Í:” Í:”! Í:”# Í:”% Í:”' Í:”, Í:"”. Í:$”0 Í:&”2 Í:(–” Í5” Í5” Í;	” Í;” Í;” Í;œ” Í5” Í5” Í<	” Í<” Í<” Í<”  Í<”! Í<”% Í<”& Í<”. Í<$”0 Í<&’” Í5” Í5’” Í” Í	‘” Í@’” ÍC” ÍC’” ÍD” ÍD
-˜” ÍE” ÍE” ÍE” ÍE”! ÍE”# ÍE”% ÍE”' ÍEÜ ” ÍE” ÍE” Ív” Ív” Ív” Ív”! Ív”# Ív”% Ív”' Ív”, Ív!”. Ív#”0 Ív%”2 Ív'”5 Ív*”7 Ív,”9 Ív.”; Ív0”ÌA Ív6”ÌC Ív8”ÌE Ív:”ÌG Ív<–” ÍE” ÍE” Ív>” ÍvÌC” ÍvÌD” ÍvÌJž” ÍF” ÍF” ÍF” ÍF”* ÍF”, ÍF!”= ÍF2”? ÍF4”ÌC ÍF8”ÌE ÍF:”ÌI ÍF>”ÌJ ÍF?”ÌO ÍFÌD”ÌQ ÍFÌF™” ÍF” ÍF” ÍG” ÍG” ÍG”  ÍG”% ÍG"”' ÍG$”) ÍG&—” ÍH” ÍH” ÍH” ÍH” ÍH”" ÍH”# ÍH—” ÍI” ÍI” ÍI”" ÍI”% ÍI!”* ÍI&”+ ÍI'’” ÍJ
-” ÍJž” ÍK” ÍK” ÍK” ÍK”* ÍK”, ÍK!”8 ÍK-”: ÍK/”> ÍK3”Ì@ ÍK5”ÌD ÍK9”ÌE ÍK:”ÌH ÍK=”ÌJ ÍK?Ü ” ÍK” ÍK” ÍL” ÍL” ÍL”  ÍL”% ÍL"”' ÍL$”) ÍL&”* ÍL'”. ÍL+”/ ÍL,”> ÍL;”? ÍL<”ÌD ÍLÌA”ÌE ÍLÌB˜” ÍM” ÍM” ÍM” ÍM”" ÍM”# ÍM”+ ÍM ”- ÍM"–” ÍM” ÍM” ÍN” ÍN” ÍN” ÍN–” ÍM” ÍM” ÍO” ÍO” ÍO”$ ÍO–” ÍM” ÍM” ÍP” ÍP” ÍP” ÍP’” ÍM” ÍMš” ÍQ” ÍQ” ÍQ” ÍQ” ÍQ” ÍQ”% ÍQ!”( ÍQ$”) ÍQ%”+ ÍQ'–” ÍR
-” ÍR”$ ÍR”( ÍR”) ÍR”2 ÍR–” ÍR
-” ÍR” ÍS”% ÍS”& ÍS”( ÍSÜ ” ÍR
-” ÍR” ÍT”& ÍT”' ÍT”+ ÍT”, ÍT”: ÍT*”; ÍT+”< ÍT,”= ÍT-”ÌF ÍT6”ÌG ÍT7”ÌH ÍT8”ÌI ÍT9”ÌR ÍTÌB–” ÍR
-” ÍR” ÍU”" ÍU”# ÍU”) ÍU’” ÍR
-” ÍR‘” ÍV	‘” ÍV	˜” ÍW” ÍW” ÍW” ÍW” ÍW”  ÍW”! ÍW”# ÍW–” ÍW” ÍW” Í`
-” Í`” Í`” Í`ž” ÍX
-” ÍX” ÍX” ÍX”* ÍX!”, ÍX#”2 ÍX)”4 ÍX+”8 ÍX/”: ÍX1”> ÍX5”? ÍX6”ÌJ ÍXÌA”ÌL ÍXÌC˜” ÍX
-” ÍX” ÍY” ÍY” ÍY”$ ÍY”% ÍY”+ ÍY"–” ÍX
-” ÍX” ÍZ”" ÍZ”# ÍZ”$ ÍZŸ” ÍX
-” ÍX” Í[” Í[” Í[”  Í[”% Í[$”' Í[&”) Í[(”* Í[)”. Í[-”/ Í[.”: Í[9”= Í[<”ÌB Í[ÌAž” Í\
-” Í\” Í\” Í\”* Í\!”, Í\#”1 Í\(”3 Í\*”7 Í\.”9 Í\0”= Í\4”> Í\5”ÌO Í\ÌF”ÌQ Í\ÌH˜” Í\
-” Í\” Í]” Í]” Í]”$ Í]”% Í]”+ Í]"–” Í\
-” Í\” Í^”" Í^”# Í^”$ Í^Ÿ” Í\
-” Í\” Í_” Í_” Í_”  Í_”% Í_$”' Í_&”) Í_(”* Í_)”. Í_-”/ Í_.”Ì@ Í_?”ÌC Í_ÌB”ÌH Í_ÌG’” ÍW” ÍW”” Ía” Ía” Ía”3 Ía(–” Ía” Ía” Ía*” Ía2” Ía3” Ía5–” Ía” Ía” Ía7” ÍaÌ@” ÍaÌA”$ ÍaÌJ–” Ía” Ía” ÍaÌL” ÍaÌQ” ÍaÌR” ÍaÌX’” Ía” Ía˜” Íb” Íb” Íb” Íb” Íb”  Íb”! Íb”# Íb–” Íb” Íb” Íi
-” Íi” Íi” Íiž” Íc
-” Íc” Íc” Íc”* Íc!”, Íc#”8 Íc/”: Íc1”> Íc5”Ì@ Íc7”ÌD Íc;”ÌE Íc<”ÌQ ÍcÌH”ÌS ÍcÌJ–” Íc
-” Íc” Íd”" Íd”# Íd”$ ÍdŸ” Íc
-” Íc” Íe” Íe” Íe”  Íe”% Íe$”' Íe&”) Íe(”* Íe)”. Íe-”/ Íe.”; Íe:”> Íe=”ÌC ÍeÌBž” Íf
-” Íf” Íf” Íf”* Íf!”, Íf#”9 Íf0”; Íf2”? Íf6”ÌA Íf8”ÌE Íf<”ÌF Íf=”ÌR ÍfÌI”ÌT ÍfÌK–” Íf
-” Íf” Íg”" Íg”# Íg”$ ÍgŸ” Íf
-” Íf” Íh” Íh” Íh”  Íh”% Íh$”' Íh&”) Íh(”* Íh)”. Íh-”/ Íh.”; Íh:”> Íh=”ÌC ÍhÌB’” Íb” Íbž” Íj” Íj” Íj” Íj”* Íj”, Íj!”4 Íj)”6 Íj+”: Íj/”< Íj1”Ì@ Íj5”ÌA Íj6”ÌE Íj:”ÌG Íj<Ÿ” Íj” Íj” Ík” Ík” Ík”  Ík”% Ík"”' Ík$”) Ík&”* Ík'”. Ík+”/ Ík,”3 Ík0”6 Ík3”; Ík8’” Íl” Íl–” Íl” Íl” Íp
-” Íp” Íp” Íp”” Ím
-” Ím” Ím” Ím–” Ím
-” Ím” Ím” Ím"” Ím#” Ím$’” Ím
-” ÍmÜ ” Ín
-” Ín” Ín” Ín”  Ín”" Ín”, Ín#”- Ín$”3 Ín*”5 Ín,”9 Ín0”; Ín2”? Ín6”Ì@ Ín7”ÌI ÍnÌ@”ÌK ÍnÌBŸ” Ín
-” Ín” Ío” Ío” Ío” Ío”" Ío%”$ Ío'”& Ío)”' Ío*”+ Ío.”, Ío/”5 Ío8”8 Ío;”= ÍoÌ@’” Ín
-” Ín’” Íl” Íl”” Íq” Íq”# Íq”' Íq˜” Íq” Íq” Ír” Ír” Ír”" Ír”# Ír”( Ír –” Íq” Íq” Ís”" Ís”# Ís”, Ís$–” Íq” Íq” Ít” Ít” Ít” Ítœ” Íq” Íq” Íu” Íu” Íu” Íu”  Íu”! Íu”% Íu”& Íu”/ Íu'”1 Íu)’” Íq” Íq’” ÍE” ÍE’” ÍD” ÍD
-‘” ÍxÔrG–§version¤file§sources®sourcesContent¥names¨mappingsÀ‘À‘ÀÜ‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
+ÀÔrD˜·../data/VideoRepositoryµ../data/VideoLauncher³../data/FormUpdater·../component/CoverThumb¸../data/WatchingCardData³../data/ShareParser²../model/VideoItemµ../data/TitleResolverÔrE—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙ7E:\new-chat\entry\src\main\ets\data\VideoRepository.etsAÃªoh-resolveÂEAÂÙ5E:\new-chat\entry\src\main\ets\data\VideoLauncher.etsAÃªoh-resolveÂEAÂÙ3E:\new-chat\entry\src\main\ets\data\FormUpdater.etsAÃªoh-resolveÂEAÂÙ7E:\new-chat\entry\src\main\ets\component\CoverThumb.etsAÃªoh-resolveÂEAÂÙ8E:\new-chat\entry\src\main\ets\data\WatchingCardData.etsAÃªoh-resolveÂEAÂÙ3E:\new-chat\entry\src\main\ets\data\ShareParser.etsAÃªoh-resolveÂEAÂÙ2E:\new-chat\entry\src\main\ets\model\VideoItem.etsAÃªoh-resolveÂEAÂÙ5E:\new-chat\entry\src\main\ets\data\TitleResolver.etsAÃªoh-resolveÂ“ÔrF–§version¤fileªsourceRoot§sources¥names¨mappings¨Index.js ‘©Index.etsÜéž”   ” ”	 ” ” )”" 7”$ 9”- ÌB”/ ÌD”5 ÌJ”7 ÌL”= ÌR”ÌQ Ìf”ÌR Ìg˜”   ” ”	 	” ” ”   ”9 9”: :˜”   ” ”	 	” ” ” ”4 4”5 5˜”   ” ”	 	” ” ”! !”8 8”9 9˜”   ” ”	 	” ” ” ”5 5”6 6˜”   ” ”	 	”   ”" "”( (”= =”> >˜”   ” ”	 	” ” ” ”4 4”5 5˜”   ” ”	 	” ” ”" "”< <”= =’” ” ‘”  ’”5 ”7 !’”5 ”9 ’”9 ”> $’”8 ”: ’”4 ”6 ’”2 ”4 ’”7 ”; "’”: ”< !’”Ì@ %”ÌB '’”;  ”= "’”;  ”= "’”7 ”9 ’”3 ”5 ’”8 ”= #’”= #”ÌB (’”8 ”: ’”< "”ÌA '’” !” ! “” "” " ” "!‘” 
+"’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” 	” ’” $” $œ” %” %
+” %” %” %” %”) %%”+ %'”, %(”: %6”< %8”= %9•” &” &” &	” &” &’” '” '‘”	 (›” )” )” )	” )” )” )”- ))”. )*”5 )1”6 )2”7 )3Ü ” *” *” *	” *” *” *” *” *”" *”$ * ”% *!”< *8”= *9”ÌD *Ì@”ÌE *ÌA”ÌF *ÌB”ÌG *ÌC”ÌL *ÌH”ÌM *ÌI”ÌP *ÌL”ÌR *ÌN”” +”	 +”
+ +” +’” ,” ,”” .”	 .”
+ .” .—” /” /” /	” /” /” /” /’” 0” 0‘”	 1œ” 2” 2
+” 2” 2” 2”! 2”" 2”, 2(”- 2)”1 2-”3 2/”4 20–” 3” 3” 3” 3” 3” 3” 4” 4” 4	” 4” 4” 4” 4”  4”! 4”" 4”& 4-”( 4/”* 41›” 5” 5” 5” 5”+ 5%”, 5&”0 5*”1 5+”4 5.”5 5/”6 50œ” 6” 6
+” 6” 6”! 6”% 6”) 6#”* 6$”2 6,”7 61”? 69”ÌA 6;—” 7” 7” 7” 7”  7”( 7 ”) 7!•” 8” 8” 8” 8” 8‘” 9™” :” :
+” :” :” :”$ :”) :#”1 :+”3 :-—” ;” ;” ;” ;”  ;”" ;”# ;‘” <‘” <œ” =” =” =” =”  =”1 =)”2 =*”6 =.”7 =/”? =7”Ì@ =8”ÌA =9‘” >”” ?” ?” ?” ?Ü ” Ì@”	 Ì@”
+ Ì@” Ì@” Ì@” Ì@” Ì@” Ì@” Ì@” Ì@'” Ì@)” Ì@+” Ì@,” Ì@-” Ì@.”% Ì@7”( Ì@:”) Ì@;”* Ì@<”3 Ì@ÌE”4 Ì@ÌF”5 Ì@ÌG”” ÌA” ÌA” ÌA” ÌA—” ÌB” ÌB” ÌB” ÌB” ÌB”  ÌB”! ÌB‘”	 ÌC–” ÌD” ÌD” ÌD	” ÌD”  ÌD”! ÌD’” ÌE” ÌE’” ÌG” ÌG˜” ÌH” ÌH” ÌH” ÌH” ÌH” ÌH”  ÌH”" ÌHÜ ” ÌI” ÌI” ÌI” ÌI” ÌI” ÌI”% ÌI”& ÌI ”' ÌI!”+ ÌI0”- ÌI2”/ ÌI4”0 ÌI5”1 ÌI6”5 ÌI:”6 ÌI;”? ÌIÌD”Ì@ ÌIÌE”ÌA ÌIÌF‘”	 ÌJ˜” ÌK” ÌK” ÌK” ÌK” ÌK” ÌK”! ÌK”# ÌKÜ ” ÌL” ÌL” ÌL” ÌL” ÌL” ÌL”% ÌL”& ÌL ”' ÌL!”+ ÌL0”- ÌL2”/ ÌL4”0 ÌL5”4 ÌL9”5 ÌL:”> ÌLÌC”? ÌLÌD”Ì@ ÌLÌE‘”	 ÌM–” ÌN” ÌN” ÌN” ÌN” ÌN” ÌN’” ÌO” ÌO”” ÌQ” ÌQ” ÌQ” ÌQ™” ÌR” ÌR
+” ÌR” ÌR”% ÌR!”& ÌR"”+ ÌR'”, ÌR(”- ÌR)Ü ” ÌS” ÌS
+” ÌS” ÌS”# ÌS”$ ÌS ”' ÌS#”( ÌS$”. ÌS*”1 ÌS-”2 ÌS.”3 ÌS/”4 ÌS0”5 ÌS1”; ÌS7”< ÌS8”? ÌS;”Ì@ ÌS<”ÌA ÌS=”ÌB ÌS>”ÌG ÌSÌC”ÌH ÌSÌD”ÌL ÌSÌH”ÌN ÌSÌJ”ÌO ÌSÌK—” ÌT” ÌT” ÌT	” ÌT” ÌT” ÌT”  ÌTÜ ” ÌU” ÌU
+” ÌU” ÌU”& ÌU"”' ÌU#”3 ÌU/”4 ÌU0”: ÌU6”= ÌU9”> ÌU:”? ÌU;”Ì@ ÌU<”ÌA ÌU=”ÌM ÌUÌI”ÌN ÌUÌJ”ÌO ÌUÌK”ÌP ÌUÌL”ÌU ÌUÌQ”ÌV ÌUÌR”ÌW ÌUÌSÜ ” ÌV” ÌV” ÌV	” ÌV” ÌV” ÌV”$ ÌV ”( ÌV$”) ÌV%”* ÌV&”+ ÌV'”2 ÌV.”3 ÌV/”4 ÌV0”5 ÌV1”ÌC ÌV?”ÌD ÌVÌ@”ÌI ÌVÌE”ÌJ ÌVÌF”ÌK ÌVÌGÜ ” ÌW” ÌW” ÌW” ÌW” ÌW” ÌW” ÌW”" ÌW”# ÌW”' ÌW#”( ÌW$”, ÌW(”- ÌW)”2 ÌW.”3 ÌW/”7 ÌW3”9 ÌW5”: ÌW6”Ì@ ÌW<”ÌE ÌWÌA”ÌF ÌWÌB”ÌJ ÌWÌF”ÌN ÌWÌJ”ÌO ÌWÌK”Ì\ ÌWÌX”Ì] ÌWÌY”Ì_ ÌWÌ[™” ÌX” ÌX
+” ÌX” ÌX” ÌX” ÌX”  ÌX”% ÌX”& ÌX —” ÌY” ÌY
+” ÌY” ÌY”! ÌY”% ÌY”& ÌY ‘”	 ÌZ˜” Ì[” Ì[” Ì[” Ì[” Ì[” Ì[”  Ì[”" Ì[˜” Ì\” Ì\” Ì\” Ì\” Ì\”( Ì\"”) Ì\#”* Ì\$˜” Ì]” Ì]
+” Ì]” Ì]” Ì]” Ì]”  Ì]”! Ì]‘”	 Ì^š” Ì_” Ì_” Ì_	” Ì_” Ì_”! Ì_”" Ì_”. Ì_*”/ Ì_+”1 Ì_-—” Ì`” Ì`
+” Ì`” Ì`”" Ì`”' Ì`!”( Ì`"˜” Ìa” Ìa
+” Ìa” Ìa” Ìa”" Ìa”& Ìa ”( Ìa"—” Ìb” Ìb” Ìb” Ìb”! Ìb”# Ìb”$ Ìb‘” Ìc’” Ìd” Ìd‘”	 Ìe™” Ìf” Ìf
+” Ìf” Ìf” Ìf” Ìf” Ìf”' Ìf#”( Ìf$—” Ìg” Ìg” Ìg	” Ìg” Ìg”" Ìg”# Ìg—” Ìh” Ìh” Ìh	” Ìh” Ìh”" Ìh”# Ìh™” Ìi” Ìi” Ìi	” Ìi” Ìi”$ Ìi ”% Ìi!”( Ìi$”* Ìi&š” Ìj” Ìj
+” Ìj” Ìj” Ìj”' Ìj!”) Ìj#”. Ìj(”/ Ìj)”0 Ìj*–” Ìk”	 Ìk” Ìk” Ìk
+” Ìk” Ìk’” Ìl” Ìl”” Ìn” Ìn” Ìn” Ìn!™” Ìo” Ìo
+” Ìo” Ìo”% Ìo!”& Ìo"”+ Ìo'”, Ìo(”- Ìo)Ü #” Ìp” Ìp” Ìp” Ìp” Ìp” Ìp” Ìp”  Ìp”! Ìp”% Ìp!”& Ìp"”* Ìp&”+ Ìp'”. Ìp*”/ Ìp+”3 Ìp/”5 Ìp1”6 Ìp2”< Ìp8”ÌA Ìp=”ÌB Ìp>”ÌF ÌpÌB”ÌJ ÌpÌF”ÌK ÌpÌG”ÌN ÌpÌJ”ÌO ÌpÌK”ÌS ÌpÌO”ÌU ÌpÌQ”ÌZ ÌpÌV”Ì_ ÌpÌ[”Ì` ÌpÌ\”Ìd ÌpÌ`”Ìf ÌpÌb”Ìg ÌpÌc”Ìi ÌpÌe˜” Ìq” Ìq
+” Ìq”  Ìq”! Ìq”& Ìq ”' Ìq!”( Ìq"’” Ìr” Ìr‘”	 Ìs—” Ìt” Ìt” Ìt	” Ìt” Ìt” Ìt” Ìt—” Ìu” Ìu” Ìu	” Ìu” Ìu”" Ìu”# Ìu’” Ìv” Ìv˜” Ìx”	 Ìx”
+ Ìx” Ìx” Ìx” Ìx” Ìx” Ìx,’” Ìy” Ìyš” Ìz” Ìz” Ìz” Ìz” Ìz”/ Ìz)”0 Ìz*”3 Ìz-”4 Ìz.”5 Ìz/Ü ” Ì{” Ì{
+” Ì{” Ì{” Ì{” Ì{”) Ì{#”- Ì{'”1 Ì{+”2 Ì{,”5 Ì{/”6 Ì{0”: Ì{4”< Ì{6”ÌA Ì{;”ÌD Ì{>”ÌF Ì{Ì@’” Ì|” Ì|‘” Ì}Ü ” Ì~” Ì~
+” Ì~” Ì~” Ì~” Ì~”! Ì~”$ Ì~”% Ì~”) Ì~#”* Ì~$”. Ì~(”/ Ì~)”4 Ì~.”5 Ì~/”9 Ì~3”; Ì~5”< Ì~6”ÌB Ì~<”ÌG Ì~ÌA”ÌH Ì~ÌB”ÌL Ì~ÌF”ÌP Ì~ÌJ”ÌQ Ì~ÌK”Ì^ Ì~ÌX”Ì_ Ì~ÌY”Ìa Ì~Ì[™” Ì” Ì” Ì” Ì” Ì”! Ì”" Ì”' Ì”( Ì —” Ì€” Ì€” Ì€”" Ì€”% Ì€”) Ì€!”* Ì€"—” Ì” Ì” Ì” Ì”! Ì”1 Ì)”2 Ì*” Ì‚” Ì‚”" Ì‚”% Ì‚”) Ì‚!”* Ì‚"”/ Ì‚'”0 Ì‚(”5 Ì‚-”6 Ì‚.”ÌE Ì‚=”ÌF Ì‚>”ÌG Ì‚?Ü ” Ìƒ” Ìƒ”  Ìƒ”$ Ìƒ”0 Ìƒ(”1 Ìƒ)”2 Ìƒ*”3 Ìƒ+”7 Ìƒ/”; Ìƒ3”< Ìƒ4”ÌG Ìƒ?”ÌH ÌƒÌ@”ÌN ÌƒÌF”ÌS ÌƒÌK”ÌT ÌƒÌL”ÌV ÌƒÌNš” Ì„
+” Ì„” Ì„”$ Ì„”' Ì„”3 Ì„)”4 Ì„*”5 Ì„+”6 Ì„,”7 Ì„-‘” Ì…	‘” Ì†” Ì†” Ì†” Ì†” Ì†” Ì†”  Ì†”$ Ì† ”& Ì†"”' Ì†#”- Ì†)”0 Ì†,”1 Ì†-”3 Ì†/—” Ì‡” Ì‡” Ì‡” Ì‡”! Ì‡”0 Ì‡(”1 Ì‡)‘” Ìˆ‘” Ìˆ—” Ì‰” Ì‰” Ì‰” Ì‰”! Ì‰”1 Ì‰)”2 Ì‰*‘” ÌŠš” Ì‹” Ì‹
+” Ì‹” Ì‹” Ì‹” Ì‹”$ Ì‹”' Ì‹!”( Ì‹"”* Ì‹$™” ÌŒ” ÌŒ” ÌŒ” ÌŒ”  ÌŒ”$ ÌŒ”% ÌŒ”- ÌŒ%”. ÌŒ&‘” ÌÜ ” ÌŽ” ÌŽ
+” ÌŽ” ÌŽ”$ ÌŽ”' ÌŽ!”( ÌŽ"”, ÌŽ&”0 ÌŽ*”1 ÌŽ+”= ÌŽ7”> ÌŽ8”ÌB ÌŽ<”ÌD ÌŽ>”ÌE ÌŽ?”ÌK ÌŽÌE”ÌP ÌŽÌJ”ÌQ ÌŽÌK”ÌS ÌŽÌMœ” Ì” Ì” Ì”! Ì”$ Ì”* Ì"”+ Ì#”/ Ì'”0 Ì(”? Ì7”Ì@ Ì8”ÌA Ì9‘” ÌÜ ” Ì‘” Ì‘
+” Ì‘” Ì‘”$ Ì‘”' Ì‘!”( Ì‘"”, Ì‘&”0 Ì‘*”1 Ì‘+”= Ì‘7”> Ì‘8”ÌB Ì‘<”ÌD Ì‘>”ÌE Ì‘?”ÌK Ì‘ÌE”ÌP Ì‘ÌJ”ÌQ Ì‘ÌK”ÌS Ì‘ÌMœ” Ì’” Ì’” Ì’”! Ì’”$ Ì’”* Ì’"”+ Ì’#”/ Ì’'”0 Ì’(”? Ì’7”Ì@ Ì’8”ÌA Ì’9‘” Ì“‘”	 Ì””” Ì”” Ì”” Ì”” Ì”˜” Ì•” Ì•
+” Ì•” Ì•” Ì•” Ì•”) Ì•#”+ Ì•%—” Ì–” Ì–” Ì–” Ì–”! Ì–”/ Ì–'”0 Ì–(‘” Ì—‘”	 Ì˜‘” Ì˜˜” Ì™” Ì™
+” Ì™” Ì™” Ì™” Ì™”) Ì™#”+ Ì™%—” Ìš” Ìš” Ìš”# Ìš”& Ìš”+ Ìš#”, Ìš$‘” Ì›‘”	 Ìœ’” Ì” Ì”” ÌŸ”	 ÌŸ”
+ ÌŸ” ÌŸ–” Ì ” Ì ” Ì ” Ì ” Ì ” Ì Ü ” Ì¡” Ì¡	” Ì¡” Ì¡” Ì¡” Ì¡” Ì¡” Ì¡” Ì¡”  Ì¡”! Ì¡”' Ì¡#”( Ì¡$”. Ì¡*”0 Ì¡,”1 Ì¡-”3 Ì¡/”5 Ì¡1Ü ” Ì¢” Ì¢
+” Ì¢” Ì¢” Ì¢”" Ì¢”# Ì¢”$ Ì¢”% Ì¢”& Ì¢ ”. Ì¢(”3 Ì¢-”; Ì¢5”? Ì¢9”ÌC Ì¢=”ÌD Ì¢>”ÌJ Ì¢ÌD”ÌK Ì¢ÌE”ÌL Ì¢ÌF”ÌM Ì¢ÌG”ÌN Ì¢ÌH”ÌV Ì¢ÌP”ÌW Ì¢ÌQ”Ì] Ì¢ÌW”Ì` Ì¢ÌZ”Ìa Ì¢Ì[”Ìc Ì¢Ì]’” Ì£” Ì£‘” Ì¤’” Ì¥” Ì¥
+Ü ” Ì¦” Ì¦” Ì¦” Ì¦”# Ì¦”3 Ì¦+”4 Ì¦,”8 Ì¦0”9 Ì¦1”? Ì¦7”Ì@ Ì¦8”ÌA Ì¦9”ÌB Ì¦:”ÌC Ì¦;”ÌF Ì¦>”ÌG Ì¦?”ÌH Ì¦Ì@š” Ì§” Ì§” Ì§” Ì§”! Ì§”" Ì§”( Ì§ ”+ Ì§#”, Ì§$”. Ì§&ž” Ì¨
+” Ì¨” Ì¨” Ì¨”  Ì¨”! Ì¨”" Ì¨”# Ì¨”+ Ì¨!”. Ì¨$”2 Ì¨(”3 Ì¨)”; Ì¨1”< Ì¨2•” Ì©
+” Ì©” Ì©”" Ì©”# Ì©‘” Ìª	Ü ” Ì«” Ì«” Ì«” Ì«” Ì«”  Ì«”! Ì«”" Ì«”# Ì«”2 Ì«*”7 Ì«/”8 Ì«0”< Ì«4”Ì@ Ì«8”ÌA Ì«9”ÌP Ì«ÌH”ÌS Ì«ÌK”ÌT Ì«ÌL”ÌV Ì«ÌNž” Ì¬
+” Ì¬” Ì¬” Ì¬”  Ì¬”! Ì¬”" Ì¬”# Ì¬”2 Ì¬(”5 Ì¬+”9 Ì¬/”: Ì¬0”ÌI Ì¬?”ÌJ Ì¬Ì@•” Ì­
+” Ì­” Ì­”" Ì­”# Ì­‘” Ì®	Ü ” Ì¯” Ì¯” Ì¯” Ì¯” Ì¯”  Ì¯”! Ì¯”" Ì¯”# Ì¯”2 Ì¯*”7 Ì¯/”8 Ì¯0”< Ì¯4”Ì@ Ì¯8”ÌA Ì¯9”ÌP Ì¯ÌH”ÌS Ì¯ÌK”ÌT Ì¯ÌL”ÌV Ì¯ÌNž” Ì°
+” Ì°” Ì°” Ì°”  Ì°”! Ì°”" Ì°”# Ì°”2 Ì°(”5 Ì°+”9 Ì°/”: Ì°0”ÌI Ì°?”ÌJ Ì°Ì@•” Ì±
+” Ì±” Ì±”" Ì±”# Ì±‘” Ì²	‘” Ì³”” Ì³” Ì³” Ì³” Ì³‘” Ì´‘”	 Ìµ”” Ì¶” Ì¶” Ì¶” Ì¶ž” Ì·” Ì·
+” Ì·” Ì·” Ì·” Ì·” Ì·”% Ì·”& Ì· ”+ Ì·%”, Ì·&”- Ì·'”. Ì·(”/ Ì·)—” Ì¸” Ì¸” Ì¸” Ì¸” Ì¸”  Ì¸”! Ì¸‘”	 Ì¹’” Ìº” Ìº’” Ì¼” Ì¼
+—” Ì½” Ì½” Ì½	” Ì½” Ì½” Ì½” Ì½—” Ì¾” Ì¾” Ì¾	” Ì¾” Ì¾” Ì¾” Ì¾—” Ì¿” Ì¿” Ì¿	” Ì¿” Ì¿” Ì¿” Ì¿—” ÌÀ” ÌÀ” ÌÀ	” ÌÀ” ÌÀ” ÌÀ” ÌÀ—” ÌÁ” ÌÁ” ÌÁ	” ÌÁ” ÌÁ” ÌÁ” ÌÁ—” ÌÂ” ÌÂ” ÌÂ	” ÌÂ”! ÌÂ”# ÌÂ”$ ÌÂ —” ÌÃ” ÌÃ” ÌÃ	” ÌÃ” ÌÃ” ÌÃ” ÌÃ—” ÌÄ” ÌÄ” ÌÄ	” ÌÄ” ÌÄ” ÌÄ” ÌÄ—” ÌÅ” ÌÅ” ÌÅ	” ÌÅ” ÌÅ” ÌÅ” ÌÅ—” ÌÆ” ÌÆ” ÌÆ	” ÌÆ” ÌÆ” ÌÆ” ÌÆ—” ÌÇ” ÌÇ” ÌÇ	” ÌÇ” ÌÇ” ÌÇ” ÌÇ—” ÌÈ” ÌÈ” ÌÈ	” ÌÈ” ÌÈ” ÌÈ” ÌÈ—” ÌÉ” ÌÉ” ÌÉ	” ÌÉ” ÌÉ”" ÌÉ”# ÌÉ—” ÌÊ” ÌÊ” ÌÊ	” ÌÊ” ÌÊ”# ÌÊ”$ ÌÊ —” ÌË” ÌË” ÌË	” ÌË” ÌË” ÌË” ÌË’” ÌÌ” ÌÌ”” ÌÎ” ÌÎ” ÌÎ” ÌÎ™” ÌÏ” ÌÏ” ÌÏ	” ÌÏ” ÌÏ” ÌÏ” ÌÏ”  ÌÏ”! ÌÏ™” ÌÐ” ÌÐ” ÌÐ	” ÌÐ” ÌÐ” ÌÐ” ÌÐ” ÌÐ”  ÌÐ™” ÌÑ” ÌÑ” ÌÑ	” ÌÑ” ÌÑ” ÌÑ” ÌÑ” ÌÑ” ÌÑ™” ÌÒ” ÌÒ” ÌÒ	” ÌÒ” ÌÒ” ÌÒ” ÌÒ”% ÌÒ!”& ÌÒ"Ü ” ÌÓ” ÌÓ” ÌÓ	” ÌÓ” ÌÓ” ÌÓ”  ÌÓ”' ÌÓ#”* ÌÓ&”+ ÌÓ'”, ÌÓ(”- ÌÓ)”. ÌÓ*”2 ÌÓ.”3 ÌÓ/”: ÌÓ6”; ÌÓ7”ÌC ÌÓ?”ÌE ÌÓÌA”ÌF ÌÓÌB”ÌG ÌÓÌC”ÌH ÌÓÌD”ÌJ ÌÓÌF”ÌK ÌÓÌGÜ ” ÌÔ” ÌÔ” ÌÔ	” ÌÔ”! ÌÔ”% ÌÔ!”& ÌÔ"”3 ÌÔ/”6 ÌÔ2”7 ÌÔ3”8 ÌÔ4”9 ÌÔ5”: ÌÔ6”> ÌÔ:”? ÌÔ;”ÌL ÌÔÌH”ÌM ÌÔÌI”ÌU ÌÔÌQ”ÌW ÌÔÌS”ÌX ÌÔÌT”ÌY ÌÔÌU”ÌZ ÌÔÌV”Ì\ ÌÔÌX”Ì] ÌÔÌYÜ ” ÌÕ” ÌÕ” ÌÕ	” ÌÕ” ÌÕ”  ÌÕ”! ÌÕ”0 ÌÕ,”3 ÌÕ/”4 ÌÕ0”5 ÌÕ1”6 ÌÕ2”7 ÌÕ3”= ÌÕ9”> ÌÕ:”ÌB ÌÕ>”ÌC ÌÕ?”ÌR ÌÕÌN”ÌS ÌÕÌO”ÌT ÌÕÌP”ÌU ÌÕÌQ”ÌV ÌÕÌR”ÌX ÌÕÌT”ÌY ÌÕÌUÜ ” ÌÖ” ÌÖ” ÌÖ	” ÌÖ” ÌÖ”  ÌÖ”! ÌÖ”0 ÌÖ,”3 ÌÖ/”4 ÌÖ0”5 ÌÖ1”6 ÌÖ2”7 ÌÖ3”= ÌÖ9”> ÌÖ:”ÌB ÌÖ>”ÌC ÌÖ?”ÌR ÌÖÌN”ÌS ÌÖÌO”ÌT ÌÖÌP”ÌU ÌÖÌQ”ÌV ÌÖÌR”ÌX ÌÖÌT”ÌY ÌÖÌUÜ ” Ì×” Ì×” Ì×	” Ì×” Ì×” Ì×”# Ì×”$ Ì× ”, Ì×(”1 Ì×-”9 Ì×5”: Ì×6”; Ì×7”< Ì×8”Ì@ Ì×<”ÌA Ì×=”ÌI Ì×ÌE”ÌJ Ì×ÌF”ÌK Ì×ÌG”ÌL Ì×ÌH”ÌN Ì×ÌJ”ÌO Ì×ÌK™” ÌØ” ÌØ” ÌØ	” ÌØ” ÌØ” ÌØ” ÌØ” ÌØ” ÌØ™” ÌÙ” ÌÙ” ÌÙ	” ÌÙ” ÌÙ” ÌÙ” ÌÙ”' ÌÙ#”( ÌÙ$—” ÌÚ” ÌÚ” ÌÚ	” ÌÚ” ÌÚ” ÌÚ” ÌÚ—” ÌÛ” ÌÛ” ÌÛ	” ÌÛ” ÌÛ”" ÌÛ”# ÌÛ—” ÌÜ” ÌÜ” ÌÜ	” ÌÜ” ÌÜ”# ÌÜ”$ ÌÜ —” ÌÝ” ÌÝ” ÌÝ	” ÌÝ” ÌÝ” ÌÝ” ÌÝ’” ÌÞ” ÌÞ”” Ìà”	 Ìà”
+ Ìà” Ìà—” Ìá” Ìá” Ìá	” Ìá” Ìá” Ìá” Ìá’” Ìâ” Ìâ‘”	 ÌãÜ ” Ìä” Ìä” Ìä	” Ìä” Ìä” Ìä” Ìä” Ìä” Ìä"” Ìä$” Ìä0”  Ìä2”" Ìä4”# Ìä5”$ Ìä6”% Ìä7”. ÌäÌ@”1 ÌäÌC”2 ÌäÌD”3 ÌäÌE”< ÌäÌN”= ÌäÌO”> ÌäÌP” Ìå” Ìå
+” Ìå” Ìå” Ìå” Ìå”" Ìå”# Ìå”' Ìå#”( Ìå$”. Ìå*”/ Ìå+”0 Ìå,œ” Ìæ” Ìæ
+” Ìæ” Ìæ” Ìæ” Ìæ”) Ìæ%”+ Ìæ'”, Ìæ(”: Ìæ6”< Ìæ8”= Ìæ9”” Ìç” Ìç” Ìç” Ìç›” Ìè” Ìè”) Ìè#”* Ìè$”1 Ìè+”3 Ìè-”7 Ìè1”8 Ìè2”> Ìè8”? Ìè9”Ì@ Ìè:‘”	 Ìé’” Ìê” Ìê”” Ìì”	 Ìì”
+ Ìì” ÌìÜ ” Ìí” Ìí
+” Ìí” Ìí”% Ìí!”& Ìí"”* Ìí&”+ Ìí'”. Ìí*”/ Ìí+”5 Ìí1”8 Ìí4”9 Ìí5”: Ìí6”; Ìí7”< Ìí8”Ì@ Ìí<”ÌA Ìí=”ÌD ÌíÌ@”ÌE ÌíÌA”ÌF ÌíÌB”ÌG ÌíÌC”ÌK ÌíÌG”ÌL ÌíÌH”ÌQ ÌíÌM”ÌR ÌíÌN”ÌS ÌíÌOÜ ” Ìî” Ìî
+” Ìî” Ìî” Ìî”  Ìî”# Ìî”$ Ìî ”* Ìî&”- Ìî)”. Ìî*”/ Ìî+”0 Ìî,”1 Ìî-”7 Ìî3”8 Ìî4”; Ìî7”< Ìî8”= Ìî9”> Ìî:”ÌB Ìî>”ÌC Ìî?”ÌF ÌîÌB”ÌG ÌîÌC”ÌK ÌîÌG”ÌM ÌîÌI”ÌN ÌîÌJÜ ” Ìï” Ìï
+” Ìï” Ìï” Ìï”  Ìï”% Ìï!”& Ìï"”* Ìï&”, Ìï(”- Ìï)”3 Ìï/”6 Ìï2”7 Ìï3”8 Ìï4”9 Ìï5”: Ìï6”> Ìï:”? Ìï;”ÌD ÌïÌ@”ÌE ÌïÌA”ÌI ÌïÌE”ÌK ÌïÌG”ÌL ÌïÌH”ÌM ÌïÌI”ÌN ÌïÌJ”ÌT ÌïÌP”ÌU ÌïÌQ”ÌZ ÌïÌV”Ì[ ÌïÌWž” Ìð” Ìð” Ìð” Ìð” Ìð”" Ìð”# Ìð”' Ìð#”/ Ìð+”0 Ìð,”6 Ìð2”; Ìð7”< Ìð8”> Ìð:’” Ìñ” Ìñ‘”	 ÌòÜ ” Ìó” Ìó” Ìó” Ìó” Ìó” Ìó”  Ìó”% Ìó!”& Ìó"”* Ìó&”. Ìó*”/ Ìó+”; Ìó7”< Ìó8”Ì@ Ìó<”ÌB Ìó>”ÌC Ìó?”ÌI ÌóÌE”ÌN ÌóÌJ”ÌO ÌóÌK”ÌQ ÌóÌM’” Ìô” Ìô
+š” Ìõ” Ìõ” Ìõ” Ìõ”# Ìõ”3 Ìõ+”4 Ìõ,”< Ìõ4”= Ìõ5”> Ìõ6Ü ” Ìö” Ìö” Ìö” Ìö”! Ìö”" Ìö”( Ìö ”- Ìö%”. Ìö&”2 Ìö*”6 Ìö.”7 Ìö/”? Ìö7”Ì@ Ìö8”ÌF Ìö>”ÌI ÌöÌA”ÌJ ÌöÌB”ÌL ÌöÌD™” Ì÷
+” Ì÷” Ì÷”! Ì÷”$ Ì÷”( Ì÷”) Ì÷”1 Ì÷'”2 Ì÷(‘” Ìø	Ü ” Ìù” Ìù” Ìù” Ìù”% Ìù”& Ìù”* Ìù"”, Ìù$”- Ìù%”3 Ìù+”8 Ìù0”9 Ìù1”= Ìù5”ÌA Ìù9”ÌB Ìù:”ÌQ ÌùÌI”ÌT ÌùÌL”ÌU ÌùÌM”ÌW ÌùÌOœ” Ìú
+” Ìú” Ìú”% Ìú”( Ìú”. Ìú$”/ Ìú%”3 Ìú)”4 Ìú*”ÌC Ìú9”ÌD Ìú:”ÌE Ìú;‘” Ìû	Ü ” Ìü” Ìü” Ìü” Ìü”% Ìü”& Ìü”* Ìü"”, Ìü$”- Ìü%”3 Ìü+”8 Ìü0”9 Ìü1”= Ìü5”ÌA Ìü9”ÌB Ìü:”ÌQ ÌüÌI”ÌT ÌüÌL”ÌU ÌüÌM”ÌW ÌüÌOœ” Ìý
+” Ìý” Ìý”% Ìý”( Ìý”. Ìý$”/ Ìý%”3 Ìý)”4 Ìý*”ÌC Ìý9”ÌD Ìý:”ÌE Ìý;‘” Ìþ	‘” Ìÿ”” Ìÿ” Ìÿ” Ìÿ” Ìÿ‘” Í ‘”	 Í™” Í” Í
+” Í” Í” Í” Í” Í” Í” Í” Í” Í
+” Í” Í”' Í#”( Í$”+ Í'”3 Í/”7 Í3”ÌA Í=”ÌC Í?”ÌD ÍÌ@”ÌE ÍÌA”” Í” Í
+” Í” Íš” Í” Í” Í
+” Í” Í” Í”" Í”% Í”( Í"”* Í$”” Í” Í” Í” Í”” Í” Í	” Í” Í™” Í” Í” Í”' Í!”( Í"”, Í&”- Í'”5 Í/”6 Í0Ü ” Í	” Í	” Í	” Í	”# Í	”' Í	!”( Í	"”) Í	#”* Í	$”2 Í	,”3 Í	-”4 Í	.”5 Í	/”9 Í	3”: Í	4”ÌB Í	<›” Í
+” Í
+” Í
+” Í
+” Í
+”  Í
+”! Í
+”, Í
+&”- Í
+'”1 Í
++”2 Í
+,›” Í” Í” Í”! Í”" Í”& Í ”' Í!”8 Í2”9 Í3”= Í7”> Í8™” Í” Í” Í”& Í ”' Í!”+ Í%”, Í&”8 Í2”9 Í3™” Í” Í” Í”& Í ”' Í!”+ Í%”, Í&”8 Í2”9 Í3™” Í” Í
+” Í” Í” Í” Í” Í”  Í”" Í–” Í” Í” Í” Í” Í”% Í”” Í” Í” Í” Í”” Í” Í” Í” Í”” Í” Í” Í” Í’”	 Í”
+ ÍÜ ” Í” Í
+” Í” Í” Í” Í”! Í”" Í”+ Í'”, Í(”- Í)”2 Í9”4 Í;”6 Í=”7 Í>”< ÍÌC”= ÍÌD”? ÍÌF”ÌD ÍÌK”ÌH ÍÌO”ÌI ÍÌP”ÌK ÍÌR”ÌL ÍÌS”ÌM ÍÌT–” Í” Í” Í” Í” Í” Íš” Í” Í
+” Í” Í” Í” Í” Í”! Í”% Í”& Í ‘”	 Í‘” Íš” Í” Í
+” Í” Í” Í” Í” Í”! Í”" Í”# Í‘”	 Í—” Í” Í
+” Í” Í” Í” Í” Í—” Í” Í” Í	” Í” Í” Í”  Í’” Í” Í–” Í”	 Í”
+ Í” Í” Í” ÍÜ ” Í” Í” Í	” Í” Í” Í” Í”! Í”" Í”( Í$”) Í%”* Í&”. Í5”0 Í7”2 Í9”3 Í:”7 Í>”8 Í?”: ÍÌA”? ÍÌF”ÌA ÍÌH”ÌB ÍÌI”ÌC ÍÌJ—” Í ” Í 
+” Í ” Í ” Í ” Í ” Í ’” Í!” Í!”” Í#” Í#” Í#” Í#˜” Í$” Í$” Í$	” Í$” Í$” Í$”+ Í$'”, Í$(”” Í%” Í%” Í%” Í%˜” Í&” Í&” Í&” Í&”! Í&”" Í&”' Í&!”4 Í&.”” Í'” Í'” Í'” Í'“” Í(” Í(” Í(”” Í)” Í)” Í)” Í)•” Í*” Í*” Í*” Í*” Í*’” Í+” Í+	‘” Í,“” Í-” Í-” Í-”” Í.” Í.” Í.” Í.”” Í/” Í/” Í/”$ Í/•” Í0” Í0” Í0” Í0” Í0š” Í1
+” Í1” Í1”$ Í1”% Í1”) Í1”* Í1 ”, Í1"”- Í1#”. Í1$’” Í2” Í2	‘” Í3“”	 Í4”
+ Í4” Í4’” Í5” Í5–” Í7”	 Í7”
+ Í7” Í7” Í7” Í7!œ” Í8” Í8
+” Í8” Í8” Í8” Í8”) Í8%”+ Í8'”, Í8(”: Í86”< Í88”= Í89•” Í9” Í9” Í9	” Í9” Í9’” Í:” Í:‘”	 Í;›” Í<” Í<
+” Í<” Í<”' Í<#”( Í<$”, Í<(”- Í<)”0 Í<,”1 Í<-”2 Í<.Ü ” Í=” Í=
+” Í=” Í=”! Í=”& Í="”* Í=&”+ Í='”, Í=(”- Í=)”5 Í=1”6 Í=2”7 Í=3”8 Í=4”< Í=8”= Í=9”ÌE Í=ÌA”ÌF Í=ÌBÜ ” Í>” Í>
+” Í>” Í>”# Í>:”% Í><”) Í>Ì@”* Í>ÌA”- Í>ÌD”/ Í>ÌF”7 Í>ÌN”9 Í>ÌP”= Í>ÌT”> Í>ÌU”ÌM Í>Ìd”ÌN Í>Ìe”ÌO Í>Ìf’” Í?” Í?”” ÍB” ÍB” ÍB” ÍB”” ÍC” ÍC
+”# ÍC”' ÍCÜ ” ÍC” ÍC
+” ÍD” ÍD” ÍD”! ÍD”" ÍD”( ÍD”- ÍD!”1 ÍD%”2 ÍD&”3 ÍD'”4 ÍD(”9 ÍD-”: ÍD.”? ÍD3”Ì@ ÍD4”ÌA ÍD5”ÌB ÍD6”ÌK ÍD?Ü ” ÍC” ÍC
+” ÍE”" ÍE”# ÍE”' ÍE”( ÍE”. ÍE"”3 ÍE'”7 ÍE+”8 ÍE,”9 ÍE-”: ÍE.”ÌC ÍE7”ÌD ÍE8”ÌE ÍE9”ÌF ÍE:”ÌO ÍEÌC–” ÍC” ÍC
+” ÍF” ÍF”  ÍF”" ÍF–” ÍC” ÍC
+” ÍG” ÍG” ÍG” ÍG” ÍC” ÍC
+” ÍH” ÍH” ÍH” ÍH”  ÍH”! ÍH”% ÍH”& ÍH”, ÍH ”/ ÍH#”3 ÍH'’” ÍC” ÍC
+‘” ÍI”” ÍL” ÍL” ÍL” ÍL˜” ÍM” ÍM
+” ÍM” ÍM”! ÍM”# ÍM”% ÍM”' ÍM–” ÍM” ÍM
+” Í” Í” Í” Í˜” ÍM” ÍM
+” ÍŽ”" ÍŽ”# ÍŽ”( ÍŽ”) ÍŽ”. ÍŽ –” ÍM” ÍM
+” Í” Í”  Í”" ÍÜ ” ÍM” ÍM
+” Í” Í” Í” Í”" Í”$ Í”& Í”( Í”- Í”/ Í!”: Í,”< Í.”ÌC Í5”ÌE Í7”ÌF Í8”ÌH Í:”ÌO ÍÌA”ÌQ ÍÌC”ÌR ÍÌD”ÌT ÍÌF–” ÍM” ÍM
+” Í‘” Í‘
+” Í‘” Í‘˜” ÍN” ÍN	” ÍN
+” ÍN” ÍN”  ÍN”" ÍN”$ ÍN–” ÍN” ÍN	” Í…” Í…” Í…” Í…ž” ÍN” ÍN	” Í†” Í†” Í†” Í†” Í†” Í†”" Í†”# Í†”, Í†#”- Í†$”1 Í†(”2 Í†)“”, ÍO”6 ÍO”= ÍO™” ÍP
+” ÍP” ÍP”0 ÍP"”1 ÍP#”5 ÍP'”6 ÍP(”> ÍP0”? ÍP1–” ÍQ
+”  ÍQ”" ÍQ”& ÍQ”' ÍQ”/ ÍQ!”” ÍR
+”" ÍR”$ ÍR”& ÍR”” ÍS
+”# ÍS”% ÍS”( ÍS”” ÍT
+” ÍT”  ÍT”" ÍT”” ÍU
+”  ÍU”" ÍU”$ ÍU‘” ÍV	™” ÍP
+”! ÍP”# ÍP”4 ÍP"”5 ÍP#”9 ÍP'”: ÍP(”ÌB ÍP0”ÌC ÍP1–” ÍQ
+”$ ÍQ”& ÍQ”* ÍQ”+ ÍQ”3 ÍQ!”” ÍR
+”& ÍR”( ÍR”* ÍR”” ÍS
+”' ÍS”) ÍS”, ÍS”” ÍT
+”" ÍT”$ ÍT”& ÍT”” ÍU
+”$ ÍU”& ÍU”( ÍU™” ÍP
+” ÍP” ÍP”0 ÍP"”1 ÍP#”5 ÍP'”6 ÍP(”> ÍP0”? ÍP1–” ÍQ
+”  ÍQ”" ÍQ”& ÍQ”' ÍQ”/ ÍQ!”” ÍR
+”" ÍR”$ ÍR”& ÍR”” ÍS
+”# ÍS”% ÍS”( ÍS”” ÍT
+” ÍT”  ÍT”" ÍT”” ÍU
+”  ÍU”" ÍU”$ ÍU˜” ÍW” ÍW” ÍW” ÍW”! ÍW”# ÍW”$ ÍW”& ÍW–” ÍW” ÍW” Íƒ
+” Íƒ”  Íƒ”! Íƒ’” ÍX
+” ÍX–” ÍX
+” ÍX” Íc” Íc” Íc” Íc–” ÍY” ÍY” ÍY” ÍY” ÍY”% ÍY–” ÍY” ÍY” ÍZ” ÍZ” ÍZ” ÍZ–” ÍY” ÍY” Í[” Í[” Í[”$ Í["–” ÍY” ÍY” Í\”  Í\”! Í\”* Í\(Ü ” ÍY” ÍY” Í]” Í]” Í]” Í]” Í]”! Í]”" Í] ”$ Í]"”) Í]'”+ Í])”, Í]*”. Í],”1 Í]/”3 Í]1”4 Í]2”6 Í]4”< Í]:”> Í]<”? Í]=”ÌA Í]?–” ÍY” ÍY” Í^” Í^” Í^” Í^’” ÍY” ÍY’” Í_” Í_’” Í_” Í_ž” Í`” Í`” Í`” Í`” Í`”& Í`”' Í` ”( Í`!”) Í`"”. Í`'”/ Í`(”0 Í`)”1 Í`*”5 Í`.–” Í`” Í`” Ía” Ía” Ía” ÍaÜ ” Í`” Í`” Íb” Íb” Íb” Íb”  Íb”) Íb'”* Íb(”+ Íb)”, Íb*”5 Íb3”6 Íb4”7 Íb5”8 Íb6”ÌA Íb?’” Í`” Í`’” ÍX
+” ÍX–” Íd
+” Íd” Íd” Íd” Íd”" Íd–” Íd
+” Íd” Íe” Íe” Íe” Íe˜” Íd
+” Íd” Íf” Íf” Íf”& Íf"”' Íf#”- Íf)–” Íd
+” Íd” Íg” Íg” Íg” Ígœ” Íd
+” Íd” Íh” Íh” Íh”  Íh”( Íh$”* Íh&”6 Íh2”7 Íh3”? Íh;”ÌA Íh=–” Íd
+” Íd” Íi” Íi” Íi” Íi’” Íd
+” ÍdÜ &” Íj
+” Íj” Íj” Íj” Íj”$ Íj”' Íj”( Íj”) Íj ”* Íj!”+ Íj"”0 Íj'”4 Íj+”5 Íj,”< Íj3”ÌA Íj8”ÌE Íj<”ÌF Íj=”ÌS ÍjÌJ”ÌV ÍjÌM”ÌW ÍjÌN”ÌX ÍjÌO”ÌY ÍjÌP”ÌZ ÍjÌQ”Ìb ÍjÌY”Ìf ÍjÌ]”Ìg ÍjÌ^”Ìt ÍjÌk”Ìx ÍjÌo”Ìy ÍjÌp”Ìz ÍjÌq”Ì{ ÍjÌr”Ì} ÍjÌt”Ì ÍjÌv”Ì€ ÍjÌw”Ì ÍjÌx”Ì‚ ÍjÌy”ÌŒ ÍjÌƒ–” Íj
+” Íj” Ík” Ík” Ík” Ík–” Íj
+” Íj” Íl” Íl” Íl”$ Íl –” Íj
+” Íj” Ím” Ím” Ím” Ím’” Íj
+” Íj˜” Ín
+” Ín” Ín” Ín”$ Ín"”' Ín%”( Ín&”* Ín(˜” Ío” Ío”  Ío”! Ío”0 Ío$”3 Ío'”4 Ío(”6 Ío*“”$ Íp”, Íp”4 ÍpŸ”( Íq”- Íq”/ Íq”3 Íq”4 Íq”7 Íq”8 Íq ”< Íq$”= Íq%”ÌL Íq4”ÌN Íq6”ÌR Íq:”ÌS Íq;”Ìb ÍqÌJ”Ìc ÍqÌK–”( Ír”- Ír”/ Ír”3 Ír”4 Ír”ÌC Ír+–”( Ís”, Ís”. Ís”: Ís"”; Ís#”ÌA Ís)‘”% Ít–”$ Íp”, Íp”- Ít”2 Ít”3 Ít”< Ít –”$ Íp”, Íp”- Ít"”< Ít1”= Ít2”ÌF Ít;–”$ Íp”, Íp”- Ít=”2 ÍtÌB”3 ÍtÌC”9 ÍtÌI‘” Íu‘” ÍuÜ  ” Ív” Ív”$ Ív”* Ív”0 Ív”1 Ív”5 Ív"”6 Ív#”ÌE Ív2”ÌF Ív3”ÌI Ív6”ÌM Ív:”ÌN Ív;”Ì] ÍvÌJ”Ì` ÍvÌM”Ìa ÍvÌN”Ìb ÍvÌO”Ìc ÍvÌP”Ìd ÍvÌQ”Ìj ÍvÌW”Ìp ÍvÌ]”Ìq ÍvÌ^”Ìu ÍvÌb”Ìv ÍvÌc”Ì… ÍvÌr”Ì† ÍvÌs”Ìˆ ÍvÌu”Ì‰ ÍvÌv”ÌŠ ÍvÌw”Ì‹ ÍvÌx”Ì ÍvÌz”Ì ÍvÌ|–” Ív” Ív” Íw”% Íw”& Íw”( Íw–” Ív” Ív” Íx”& Íx”' Íx”0 Íx"–” Ív” Ív” Íy”" Íy”# Íy”) Íy’” Ív” Ív‘” Íz‘” Ízš” Í{
+” Í{” Í{” Í{” Í{” Í{”  Í{”# Í{!”$ Í{"”& Í{$–” Í|” Í|”$ Í|”( Í|”) Í|”- Í|–” Í|” Í|” Í}”% Í}”& Í}”( Í}–” Í|” Í|” Í~”& Í~”' Í~”0 Í~"–” Í|” Í|” Í”% Í”& Í”' Íœ” Í|” Í|” Í€”) Í€”* Í€”, Í€”4 Í€&”6 Í€(”ÌB Í€4”ÌC Í€5”ÌK Í€=”ÌM Í€?–” Í|” Í|” Í”" Í”# Í”) Í’” Í|” Í|‘” Í‚‘” Í‚’” ÍW” ÍW’” ÍN” ÍN	˜” Íˆ” Íˆ	” Íˆ
+” Íˆ” Íˆ”  Íˆ”! Íˆ”# Íˆ–” Íˆ” Íˆ	” Í‹” Í‹” Í‹” Í‹”” Í‰” Í‰”# Í‰”) Í‰–” Í‰” Í‰” Í‰” Í‰#”  Í‰$”! Í‰%ž” Í‰” Í‰” Í‰'” Í‰.” Í‰/” Í‰2”  Í‰4”! Í‰5”% Í‰9”& Í‰:”/ Í‰ÌC”0 Í‰ÌD”4 Í‰ÌH”5 Í‰ÌI’” Í‰” Í‰”” ÍŠ” ÍŠ”# ÍŠ”' ÍŠ–” ÍŠ” ÍŠ” ÍŠ” ÍŠ” ÍŠ”& ÍŠ(–” ÍŠ” ÍŠ” ÍŠ*”" ÍŠ9”# ÍŠ:”, ÍŠÌCž” ÍŠ” ÍŠ” ÍŠÌE” ÍŠÌL” ÍŠÌM” ÍŠÌP”  ÍŠÌR”! ÍŠÌS”% ÍŠÌW”& ÍŠÌX”3 ÍŠÌe”4 ÍŠÌf”8 ÍŠÌj”9 ÍŠÌk’” ÍŠ” ÍŠ’” Íˆ” Íˆ	’” ÍM” ÍM
+‘” Í’‘” Í”š” Í•” Í•	” Í•
+” Í•”' Í•”) Í•”2 Í•#”3 Í•$”< Í•-”> Í•/–” Í•” Í•	” ÍÁ” ÍÁ” ÍÁ” ÍÁš” Í•” Í•	” ÍÂ” ÍÂ”% ÍÂ”* ÍÂ”4 ÍÂ ”ÌQ ÍÂ”ÌV ÍÂ”Ì` ÍÂ ”” ÍÂ"” ÍÂ&” ÍÂ'”$ ÍÂ2‘” ÍÂ6”” ÍÃ” ÍÃ” ÍÃ” ÍÃ”” ÍÄ” ÍÄ” ÍÄ” ÍÄ”” ÍÅ” ÍÅ” ÍÅ” ÍÅ—” ÍÆ” ÍÆ” ÍÆ” ÍÆ” ÍÆ”, ÍÆ"”. ÍÆ$‘” ÍÇ’” Í–” Í––” Í–” Í–” Í·” Í·” Í·” Í·–” Í–” Í–” Í·” Í·” Í·”  Í·!–” Í–” Í–” Í·#”" Í·2”# Í·3”, Í·<’” Í—” Í—–” Í—” Í—” Í£
+” Í£” Í£” Í£š” Í—” Í—” Í£” Í£” Í£” Í£!” Í£'”! Í£)”# Í£+”% Í£-˜” Í˜
+” Í˜” Í˜” Í˜”! Í˜”# Í˜”$ Í˜”& Í˜˜” Í˜
+” Í˜” Í›” Í›” Í›”- Í›&”. Í›'”3 Í›,”” Í™” Í™” Í™” Í™–” Í™” Í™” Í™” Í™ ” Í™!” Í™#˜” Í™” Í™” Í™%” Í™/” Í™0”& Í™:”' Í™;”+ Í™?’” Í™” Í™”” Íš” Íš” Íš”( Íš!–” Íš” Íš” Íš#” Íš+” Íš,” Íš.–” Íš” Íš” Íš0” Íš9” Íš:”$ ÍšÌC’” Íš” Íš’” Í˜
+” Í˜’” Íœ
+” Íœ’” Íœ
+” ÍœÜ ” Í
+” Í” Í” Í” Í”  Í”& Í”' Í”- Í$”. Í%”/ Í&”3 Í5”5 Í7”7 Í9”8 Í:”9 Í;”= Í?”> ÍÌ@”ÌG ÍÌI”ÌH ÍÌJ”ÌI ÍÌK”ÌO ÍÌQ”ÌU ÍÌW–” Í
+” Í” Íž” Íž” Íž” Íž–” Í
+” Í” ÍŸ” ÍŸ” ÍŸ”$ ÍŸ –” Í
+” Í” Í ”  Í ”! Í ”* Í &–” Í
+” Í” Í¡” Í¡” Í¡” Í¡–” Í
+” Í” Í¢” Í¢” Í¢”  Í¢’” Í
+” Í’” Í—” Í—˜” Í¤” Í¤” Í¤” Í¤” Í¤”  Í¤”! Í¤”# Í¤–” Í¤” Í¤” Í¨
+” Í¨” Í¨” Í¨š” Í¤” Í¤” Í¨” Í¨” Í¨” Í¨!” Í¨'”! Í¨)”# Í¨+”% Í¨-—” Í¥
+” Í¥” Í¥” Í¥”% Í¥”) Í¥ ”* Í¥!—” Í¦
+” Í¦” Í¦” Í¦”% Í¦”) Í¦ ”* Í¦!—” Í§
+” Í§” Í§” Í§”% Í§”* Í§!”+ Í§"’” Í¤” Í¤›” Í©” Í©” Í©” Í©”" Í©”$ Í© ”% Í©!”+ Í©'”0 Í©,”1 Í©-”3 Í©/˜” Íª
+” Íª”& Íª”( Íª”- Íª”/ Íª”1 Íª”3 Íª–” Íª
+” Íª” Í­”$ Í­”% Í­”+ Í­š” Íª
+” Íª” Í­”& Í­!”' Í­"”) Í­$”, Í­'”. Í­)”0 Í­+”2 Í­-˜” Íª
+” Íª” Í­/”) Í­9”* Í­:”9 Í­ÌI”: Í­ÌJ”Ì@ Í­ÌP”” Í«” Í«”$ Í«”+ Í«–” Í«” Í«” Í«”% Í«"”& Í«#”( Í«%˜” Í«” Í«” Í«'”' Í«1”( Í«2”2 Í«<”3 Í«=”9 Í«ÌC’” Í«” Í«”” Í¬” Í¬”$ Í¬”; Í¬(–” Í¬” Í¬” Í¬*”% Í¬2”& Í¬3”( Í¬5–” Í¬” Í¬” Í¬7”& Í¬Ì@”' Í¬ÌA”0 Í¬ÌJ’” Í¬” Í¬’” Íª
+” Íª‘” Í®	‘” Í®˜” Í¯
+” Í¯”$ Í¯”& Í¯”+ Í¯”- Í¯”/ Í¯”1 Í¯–” Í¯
+” Í¯” Íµ”) Íµ”* Íµ”+ Íµ–” Í¯
+” Í¯” Íµ”" Íµ!”# Íµ"”) Íµ(š” Í¯
+” Í¯” Íµ*”$ Íµ1”% Íµ2”' Íµ4”- Íµ:”/ Íµ<”1 Íµ>”3 ÍµÌ@˜” Í¯
+” Í¯” ÍµÌB”& ÍµÌK”' ÍµÌL”/ ÍµÌT”0 ÍµÌU”3 ÍµÌX’” Í°” Í°’”( Í±”0 Í±—”$ Í²”( Í²”) Í²”2 Í²”> Í²”ÌB Í²#”ÌC Í²$’”$ Í±”, Í±’”  Í±”( Í±ž”; Í°”? Í°”Ì@ Í°”ÌM Í°&”ÌO Í°(”Ìi Í´”Ìj Í´”Ìn Í´”Ìp Í´!”Ìr Í´#”Ìs Í´$”Ìw Í´(”Ìx Í´)”Ìz Í´+’” Í°” Í°’” Í¯
+” Í¯‘” Í¶	’” Í–” Í–”” Í¸” Í¸”# Í¸”+ Í¸–” Í¸” Í¸” Í¹	” Í¹” Í¹” Í¹˜” Í¸” Í¸” Íº	” Íº” Íº”" Íº”# Íº”( Íº–” Í¸” Í¸” Í»	”" Í»”# Í»”, Í»"–” Í¸” Í¸” Í¼	” Í¼”  Í¼”" Í¼ž” Í¸” Í¸” Í½	” Í½” Í½” Í½”! Í½”# Í½”% Í½”' Í½”, Í½"”. Í½$”0 Í½&”2 Í½(Ü ” Í¸” Í¸” Í¾	” Í¾” Í¾” Í¾”  Í¾”" Í¾”$ Í¾”& Í¾”+ Í¾!”- Í¾#”/ Í¾%”1 Í¾'”7 Í¾-”9 Í¾/”; Í¾1”= Í¾3œ” Í¸” Í¸” Í¿	” Í¿” Í¿” Í¿”  Í¿”! Í¿”% Í¿”& Í¿”. Í¿$”0 Í¿&’” Í¸” Í¸’” Í•” Í•	‘” ÍÈ’” ÍÊ” ÍÊ”” ÍË” ÍË
+” ÍË” ÍË'Ü ” ÍÌ” ÍÌ” ÍÌ” ÍÌ” ÍÌ”! ÍÌ”" ÍÌ”( ÍÌ"”+ ÍÌ%”, ÍÌ&”- ÍÌ'”. ÍÌ(”/ ÍÌ)”5 ÍÌ/”6 ÍÌ0”7 ÍÌ1”8 ÍÌ2”> ÍÌ8’”	 ÍÍ”
+ ÍÍ”” ÍÎ” ÍÎ” ÍÎ” ÍÎ’” ÍÏ” ÍÏ’” ÍÒ” ÍÒ’” ÍÓ” ÍÓ
+˜” ÍÔ” ÍÔ” ÍÔ” ÍÔ”! ÍÔ”# ÍÔ”% ÍÔ”' ÍÔÜ ” ÍÔ” ÍÔ” Í” Í” Í” Í”! Í”# Í”% Í”' Í”, Í!”. Í#”0 Í%”2 Í'”5 Í*”7 Í,”9 Í.”; Í0”ÌA Í6”ÌC Í8”ÌE Í:”ÌG Í<–” ÍÔ” ÍÔ” Í>” ÍÌC” ÍÌD” ÍÌJž” ÍÕ” ÍÕ” ÍÕ” ÍÕ”* ÍÕ”, ÍÕ!”; ÍÕ0”= ÍÕ2”ÌA ÍÕ6”ÌC ÍÕ8”ÌG ÍÕ<”ÌH ÍÕ=”ÌM ÍÕÌB”ÌO ÍÕÌDÜ ” ÍÕ” ÍÕ” ÍÖ” ÍÖ” ÍÖ”  ÍÖ”% ÍÖ"”' ÍÖ$”) ÍÖ&”* ÍÖ'”. ÍÖ+”/ ÍÖ,”Ì@ ÍÖ=”ÌA ÍÖ>”ÌF ÍÖÌC”ÌG ÍÖÌDž” Í×” Í×” Í×” Í×”* Í×”, Í×!”; Í×0”= Í×2”ÌA Í×6”ÌC Í×8”ÌG Í×<”ÌH Í×=”ÌK Í×Ì@”ÌM Í×ÌBÜ ” Í×” Í×” ÍØ” ÍØ” ÍØ”  ÍØ”% ÍØ"”' ÍØ$”) ÍØ&”* ÍØ'”. ÍØ+”/ ÍØ,”> ÍØ;”? ÍØ<”ÌD ÍØÌA”ÌE ÍØÌB”” ÍÙ” ÍÙ” ÍÙ” ÍÙ–” ÍÙ” ÍÙ” ÍÚ” ÍÚ” ÍÚ” ÍÚ–” ÍÙ” ÍÙ” ÍÛ” ÍÛ” ÍÛ”$ ÍÛ–” ÍÙ” ÍÙ” ÍÜ” ÍÜ” ÍÜ” ÍÜ’” ÍÙ” ÍÙš” ÍÝ” ÍÝ” ÍÝ” ÍÝ” ÍÝ”  ÍÝ”( ÍÝ”) ÍÝ”- ÍÝ"”/ ÍÝ$–” ÍÝ” ÍÝ” Íè
+” Íè” Íè” Íè’” ÍÞ
+” ÍÞ”” Íß” Íß”  Íß”$ Íß–” Íß” Íß” Íà”! Íà”" Íà”$ ÍàÜ ” Íß” Íß” Íá”" Íá”# Íá”' Íá”( Íá”0 Íá&”5 Íá+”9 Íá/”: Íá0”; Íá1”< Íá2”ÌA Íá7”ÌB Íá8”ÌG Íá=”ÌH Íá>”ÌI Íá?”ÌJ ÍáÌ@”ÌS ÍáÌIÜ ” Íß” Íß” Íâ”( Íâ”) Íâ”- Íâ#”. Íâ$”6 Íâ,”; Íâ1”? Íâ5”Ì@ Íâ6”ÌA Íâ7”ÌB Íâ8”ÌK ÍâÌA”ÌL ÍâÌB”ÌM ÍâÌC”ÌN ÍâÌD”ÌW ÍâÌMÜ ” Íß” Íß” Íã”  Íã”! Íã”# Íã”' Íã”) Íã”+ Íã!”- Íã#”2 Íã(”4 Íã*”6 Íã,”8 Íã.”; Íã1”= Íã3”> Íã4”Ì@ Íã6”ÌF Íã<”ÌH Íã>”ÌI Íã?”ÌK ÍãÌA–” Íß” Íß” Íä”% Íä”& Íä”' Íäž” Íß” Íß” Íå” Íå”  Íå”" Íå”' Íå”) Íå”* Íå ”, Íå"”2 Íå(”4 Íå*”5 Íå+”7 Íå-” Íß” Íß” Íæ”  Íæ”! Íæ”$ Íæ”& Íæ”' Íæ”+ Íæ!”, Íæ"”4 Íæ*”7 Íæ-”; Íæ1’” Íß” Íß™”/ ÍÞ”8 ÍÞ”ÌR Íç”ÌS Íç”ÌW Íç”ÌY Íç”Ì[ Íç ”Ì\ Íç!”Ì` Íç%’” ÍÞ
+” ÍÞ’” ÍÝ” ÍÝš” Íé” Íé” Íé” Íé” Íé” Íé”% Íé!”( Íé$”) Íé%”+ Íé'–” Íê
+” Íê”$ Íê”( Íê”) Íê”2 Íê–” Íê
+” Íê” Íë”% Íë”& Íë”( ÍëÜ ” Íê
+” Íê” Íì”& Íì”' Íì”+ Íì”, Íì”: Íì*”; Íì+”< Íì,”= Íì-”ÌF Íì6”ÌG Íì7”ÌH Íì8”ÌI Íì9”ÌR ÍìÌB–” Íê
+” Íê” Íí”" Íí”# Íí”) Íí’” Íê
+” Íê‘” Íî	‘” Íî	˜” Íï” Íï” Íï” Íï” Íï”  Íï”! Íï”# Íï–” Íï” Íï” Íø
+” Íø” Íø” Íøž” Íð
+” Íð” Íð” Íð”* Íð!”, Íð#”2 Íð)”4 Íð+”8 Íð/”: Íð1”> Íð5”? Íð6”ÌJ ÍðÌA”ÌL ÍðÌC˜” Íð
+” Íð” Íñ” Íñ” Íñ”$ Íñ”% Íñ”+ Íñ"–” Íð
+” Íð” Íò”" Íò”# Íò”$ ÍòŸ” Íð
+” Íð” Íó” Íó” Íó”  Íó”% Íó$”' Íó&”) Íó(”* Íó)”. Íó-”/ Íó.”: Íó9”= Íó<”ÌB ÍóÌAž” Íô
+” Íô” Íô” Íô”* Íô!”, Íô#”1 Íô(”3 Íô*”7 Íô.”9 Íô0”= Íô4”> Íô5”ÌO ÍôÌF”ÌQ ÍôÌH˜” Íô
+” Íô” Íõ” Íõ” Íõ”$ Íõ”% Íõ”+ Íõ"–” Íô
+” Íô” Íö”" Íö”# Íö”$ ÍöŸ” Íô
+” Íô” Í÷” Í÷” Í÷”  Í÷”% Í÷$”' Í÷&”) Í÷(”* Í÷)”. Í÷-”/ Í÷.”Ì@ Í÷?”ÌC Í÷ÌB”ÌH Í÷ÌG’” Íï” Íï”” Íù” Íù” Íù”3 Íù(–” Íù” Íù” Íù*” Íù2” Íù3” Íù5–” Íù” Íù” Íù7” ÍùÌ@” ÍùÌA”$ ÍùÌJ–” Íù” Íù” ÍùÌL” ÍùÌQ” ÍùÌR” ÍùÌX’” Íù” Íù˜” Íú” Íú” Íú” Íú” Íú”  Íú”! Íú”# Íú–” Íú” Íú” Í
+” Í” Í” Íž” Íû
+” Íû” Íû” Íû”* Íû!”, Íû#”8 Íû/”: Íû1”> Íû5”Ì@ Íû7”ÌD Íû;”ÌE Íû<”ÌQ ÍûÌH”ÌS ÍûÌJ–” Íû
+” Íû” Íü”" Íü”# Íü”$ ÍüŸ” Íû
+” Íû” Íý” Íý” Íý”  Íý”% Íý$”' Íý&”) Íý(”* Íý)”. Íý-”/ Íý.”; Íý:”> Íý=”ÌC ÍýÌBž” Íþ
+” Íþ” Íþ” Íþ”* Íþ!”, Íþ#”9 Íþ0”; Íþ2”? Íþ6”ÌA Íþ8”ÌE Íþ<”ÌF Íþ=”ÌR ÍþÌI”ÌT ÍþÌK–” Íþ
+” Íþ” Íÿ”" Íÿ”# Íÿ”$ ÍÿŸ” Íþ
+” Íþ” Í ” Í ” Í ”  Í ”% Í $”' Í &”) Í (”* Í )”. Í -”/ Í .”; Í :”> Í =”ÌC Í ÌB’” Íú” Íúž” Í” Í” Í” Í”* Í”, Í!”4 Í)”6 Í+”: Í/”< Í1”Ì@ Í5”ÌA Í6”ÌE Í:”ÌG Í<Ÿ” Í” Í” Í” Í” Í”  Í”% Í"”' Í$”) Í&”* Í'”. Í+”/ Í,”3 Í0”6 Í3”; Í8’” Í” Í–” Í” Í” Í
+” Í” Í” Í”” Í
+” Í” Í” Í–” Í
+” Í” Í” Í"” Í#” Í$’” Í
+” ÍÜ ” Í
+” Í” Í” Í”  Í”" Í”, Í#”- Í$”3 Í*”5 Í,”9 Í0”; Í2”? Í6”Ì@ Í7”ÌI ÍÌ@”ÌK ÍÌBŸ” Í
+” Í” Í” Í” Í” Í”" Í%”$ Í'”& Í)”' Í*”+ Í.”, Í/”5 Í8”8 Í;”= ÍÌ@’” Í
+” Í’” Í” Í”” Í	” Í	”# Í	”' Í	˜” Í	” Í	” Í
+” Í
+” Í
+”" Í
+”# Í
+”( Í
+ –” Í	” Í	” Í”" Í”# Í”, Í$–” Í	” Í	” Í” Í” Í” Íœ” Í	” Í	” Í” Í” Í” Í”  Í”! Í”% Í”& Í”/ Í'”1 Í)’” Í	” Í	’” ÍÔ” ÍÔ’” ÍÓ” ÍÓ
+‘” ÍÔrG–§version¤file§sources®sourcesContent¥names¨mappingsÀ‘À‘ÀÜò‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
  ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ‘”  Ì[ ‘”  Ì\ ‘”  Ì] ‘”  Ì^ ‘”  Ì_ ‘”  Ì` ‘”  Ìa ‘”  Ìb ‘”  Ìc ‘”  Ìd ‘”  Ìe ‘”  Ìf ‘”  Ìg ‘”  Ìh ‘”  Ìi ‘”  Ìj ‘”  Ìk ‘”  Ìl ‘”  Ìm ‘”  Ìn ‘”  Ìo ‘”  Ìp ‘”  Ìq ‘”  Ìr ‘”  Ìs ‘”  Ìt ‘”  Ìu ‘”  Ìv ‘”  Ìw ‘”  Ìx ‘”  Ìy ‘”  Ìz ‘”  Ì{ ‘”  Ì| ‘”  Ì} ‘”  Ì~ ‘”  Ì ‘”  Ì€ ‘”  Ì ‘”  Ì‚ ‘”  Ìƒ ‘”  Ì„ ‘”  Ì… ‘”  Ì† ‘”  Ì‡ ‘”  Ìˆ ‘”  Ì‰ ‘”  ÌŠ ‘”  Ì‹ ‘”  ÌŒ ‘”  Ì ‘”  ÌŽ ‘”  Ì ‘”  Ì ‘”  Ì‘ ‘”  Ì’ ‘”  Ì“ ‘”  Ì” ‘”  Ì• ‘”  Ì– ‘”  Ì— ‘”  Ì˜ ‘”  Ì™ ‘”  Ìš ‘”  Ì› ‘”  Ìœ ‘”  Ì ‘”  Ìž ‘”  ÌŸ ‘”  Ì  ‘”  Ì¡ ‘”  Ì¢ ‘”  Ì£ ‘”  Ì¤ ‘”  Ì¥ ‘”  Ì¦ ‘”  Ì§ ‘”  Ì¨ ‘”  Ì© ‘”  Ìª ‘”  Ì« ‘”  Ì¬ ‘”  Ì­ ‘”  Ì® ‘”  Ì¯ ‘”  Ì° ‘”  Ì± ‘”  Ì² ‘”  Ì³ ‘”  Ì´ ‘”  Ìµ ‘”  Ì¶ ‘”  Ì· ‘”  Ì¸ ‘”  Ì¹ ‘”  Ìº ‘”  Ì» ‘”  Ì¼ ‘”  Ì½ ‘”  Ì¾ ‘”  Ì¿ ‘”  ÌÀ ‘”  ÌÁ ‘”  ÌÂ ‘”  ÌÃ ‘”  ÌÄ ‘”  ÌÅ ‘”  ÌÆ ‘”  ÌÇ ‘”  ÌÈ ‘”  ÌÉ ‘”  ÌÊ ‘”  ÌË ‘”  ÌÌ ‘”  ÌÍ ‘”  ÌÎ ‘”  ÌÏ ‘”  ÌÐ ‘”  ÌÑ ‘”  ÌÒ ‘”  ÌÓ ‘”  ÌÔ ‘”  ÌÕ ‘”  ÌÖ ‘”  Ì× ‘”  ÌØ ‘”  ÌÙ ‘”  ÌÚ ‘”  ÌÛ ‘”  ÌÜ ‘”  ÌÝ ‘”  ÌÞ ‘”  Ìß ‘”  Ìà ‘”  Ìá ‘”  Ìâ ‘”  Ìã ‘”  Ìä ‘”  Ìå ‘”  Ìæ ‘”  Ìç ‘”  Ìè ‘”  Ìé ‘”  Ìê ‘”  Ìë ‘”  Ìì ‘”  Ìí ‘”  Ìî ‘”  Ìï ‘”  Ìð ‘”  Ìñ ‘”  Ìò ‘”  Ìó ‘”  Ìô ‘”  Ìõ ‘”  Ìö ‘”  Ì÷ ‘”  Ìø ‘”  Ìù ‘”  Ìú ‘”  Ìû ‘”  Ìü ‘”  Ìý ‘”  Ìþ ‘”  Ìÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  ÍŽ ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Íž ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍÐ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  ÍÝ ‘”  ÍÞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íð ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íý ‘”  Íþ ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  ÍŽ ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Íž ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍÐ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  ÍÝ ‘”  ÍÞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íð ‘”  Íñ ‘”  Íò ‘”  Íó ‘”  Íô ‘”  Íõ ‘”  Íö ‘”  Í÷ ‘”  Íø ‘”  Íù ‘”  Íú ‘”  Íû ‘”  Íü ‘”  Íý ‘”  Íþ ‘”  Íÿ ‘”  Í  ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í	 ‘”  Í
- ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache•ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclarationÌ€ÌÇ“ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÌ‰Ì—ÔrL”¤type¥start£end¤nameªIdentifierÌ‰Ì—®detectPlatformLªIdentifierÌ‰Ì—®detectPlatformK¯ImportSpecifierÌ™Ì¢LªIdentifierÌ™Ì¢©parseTimeLªIdentifierÌ™Ì¢©parseTimeK¯ImportSpecifierÌ¤ÌªLªIdentifierÌ¤Ìª¦toTimeLªIdentifierÌ¤Ìª¦toTimeÔrM•¤type¥start£end¥value£raw§LiteralÌ²ÌÆ²../model/VideoItem´'../model/VideoItem'J±ImportDeclarationÌÉÍ‘K¯ImportSpecifierÌÒÌáLªIdentifierÌÒÌá¯VideoRepositoryLªIdentifierÌÒÌá¯VideoRepositoryM§LiteralÌéÍ·../data/VideoRepository¹'../data/VideoRepository'J±ImportDeclarationÍÍ?‘K¯ImportSpecifierÍÍLªIdentifierÍÍ±resolveVideoTitleLªIdentifierÍÍ±resolveVideoTitleM§LiteralÍ'Í>µ../data/TitleResolver·'../data/TitleResolver'J±ImportDeclarationÍAÍw‘K¯ImportSpecifierÍJÍWLªIdentifierÍJÍW­openVideoLinkLªIdentifierÍJÍW­openVideoLinkM§LiteralÍ_Ívµ../data/VideoLauncher·'../data/VideoLauncher'J±ImportDeclarationÍyÍ·‘K¯ImportSpecifierÍ‚Í™LªIdentifierÍ‚Í™·refreshAllWatchingFormsLªIdentifierÍ‚Í™·refreshAllWatchingFormsM§LiteralÍ¡Í¶³../data/FormUpdaterµ'../data/FormUpdater'
+ ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í ‘”  Í  ‘”  Í! ‘”  Í" ‘”  Í# ‘”  Í$ ‘”  Í% ‘”  Í& ‘”  Í' ‘”  Í( ‘”  Í) ‘”  Í* ‘”  Í+ ‘”  Í, ‘”  Í- ‘”  Í. ‘”  Í/ ‘”  Í0 ‘”  Í1 ‘”  Í2 ‘”  Í3 ‘”  Í4 ‘”  Í5 ‘”  Í6 ‘”  Í7 ‘”  Í8 ‘”  Í9 ‘”  Í: ‘”  Í; ‘”  Í< ‘”  Í= ‘”  Í> ‘”  Í? ‘”  Í@ ‘”  ÍA ‘”  ÍB ‘”  ÍC ‘”  ÍD ‘”  ÍE ‘”  ÍF ‘”  ÍG ‘”  ÍH ‘”  ÍI ‘”  ÍJ ‘”  ÍK ‘”  ÍL ‘”  ÍM ‘”  ÍN ‘”  ÍO ‘”  ÍP ‘”  ÍQ ‘”  ÍR ‘”  ÍS ‘”  ÍT ‘”  ÍU ‘”  ÍV ‘”  ÍW ‘”  ÍX ‘”  ÍY ‘”  ÍZ ‘”  Í[ ‘”  Í\ ‘”  Í] ‘”  Í^ ‘”  Í_ ‘”  Í` ‘”  Ía ‘”  Íb ‘”  Íc ‘”  Íd ‘”  Íe ‘”  Íf ‘”  Íg ‘”  Íh ‘”  Íi ‘”  Íj ‘”  Ík ‘”  Íl ‘”  Ím ‘”  Ín ‘”  Ío ‘”  Íp ‘”  Íq ‘”  Ír ‘”  Ís ‘”  Ít ‘”  Íu ‘”  Ív ‘”  Íw ‘”  Íx ‘”  Íy ‘”  Íz ‘”  Í{ ‘”  Í| ‘”  Í} ‘”  Í~ ‘”  Í ‘”  Í€ ‘”  Í ‘”  Í‚ ‘”  Íƒ ‘”  Í„ ‘”  Í… ‘”  Í† ‘”  Í‡ ‘”  Íˆ ‘”  Í‰ ‘”  ÍŠ ‘”  Í‹ ‘”  ÍŒ ‘”  Í ‘”  ÍŽ ‘”  Í ‘”  Í ‘”  Í‘ ‘”  Í’ ‘”  Í“ ‘”  Í” ‘”  Í• ‘”  Í– ‘”  Í— ‘”  Í˜ ‘”  Í™ ‘”  Íš ‘”  Í› ‘”  Íœ ‘”  Í ‘”  Íž ‘”  ÍŸ ‘”  Í  ‘”  Í¡ ‘”  Í¢ ‘”  Í£ ‘”  Í¤ ‘”  Í¥ ‘”  Í¦ ‘”  Í§ ‘”  Í¨ ‘”  Í© ‘”  Íª ‘”  Í« ‘”  Í¬ ‘”  Í­ ‘”  Í® ‘”  Í¯ ‘”  Í° ‘”  Í± ‘”  Í² ‘”  Í³ ‘”  Í´ ‘”  Íµ ‘”  Í¶ ‘”  Í· ‘”  Í¸ ‘”  Í¹ ‘”  Íº ‘”  Í» ‘”  Í¼ ‘”  Í½ ‘”  Í¾ ‘”  Í¿ ‘”  ÍÀ ‘”  ÍÁ ‘”  ÍÂ ‘”  ÍÃ ‘”  ÍÄ ‘”  ÍÅ ‘”  ÍÆ ‘”  ÍÇ ‘”  ÍÈ ‘”  ÍÉ ‘”  ÍÊ ‘”  ÍË ‘”  ÍÌ ‘”  ÍÍ ‘”  ÍÎ ‘”  ÍÏ ‘”  ÍÐ ‘”  ÍÑ ‘”  ÍÒ ‘”  ÍÓ ‘”  ÍÔ ‘”  ÍÕ ‘”  ÍÖ ‘”  Í× ‘”  ÍØ ‘”  ÍÙ ‘”  ÍÚ ‘”  ÍÛ ‘”  ÍÜ ‘”  ÍÝ ‘”  ÍÞ ‘”  Íß ‘”  Íà ‘”  Íá ‘”  Íâ ‘”  Íã ‘”  Íä ‘”  Íå ‘”  Íæ ‘”  Íç ‘”  Íè ‘”  Íé ‘”  Íê ‘”  Íë ‘”  Íì ‘”  Íí ‘”  Íî ‘”  Íï ‘”  Íð ‘”  Íñ ÔrH’§missing¦pluginÃ¦genAbcÂÔ  ÔrI”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache˜ÔrJ•¤type¥start£endªspecifiers¦source±ImportDeclarationÌ€ÌÒ”ÔrK•¤type¥start£end¨imported¥local¯ImportSpecifierÌ‰Ì’ÔrL”¤type¥start£end¤nameªIdentifierÌ‰Ì’©PLATFORMSLªIdentifierÌ‰Ì’©PLATFORMSK¯ImportSpecifierÌ”Ì¢LªIdentifierÌ”Ì¢®detectPlatformLªIdentifierÌ”Ì¢®detectPlatformK¯ImportSpecifierÌ¤Ì­LªIdentifierÌ¤Ì­©parseTimeLªIdentifierÌ¤Ì­©parseTimeK¯ImportSpecifierÌ¯ÌµLªIdentifierÌ¯Ìµ¦toTimeLªIdentifierÌ¯Ìµ¦toTimeÔrM•¤type¥start£end¥value£raw§LiteralÌ½ÌÑ²../model/VideoItem´'../model/VideoItem'J±ImportDeclarationÌÔÍ‘K¯ImportSpecifierÌÝÌìLªIdentifierÌÝÌì¯VideoRepositoryLªIdentifierÌÝÌì¯VideoRepositoryM§LiteralÌôÍ·../data/VideoRepository¹'../data/VideoRepository'J±ImportDeclarationÍÍE‘K¯ImportSpecifierÍÍ'LªIdentifierÍÍ'®parseShareTextLªIdentifierÍÍ'®parseShareTextM§LiteralÍ/ÍD³../data/ShareParserµ'../data/ShareParser'J±ImportDeclarationÍGÍ€‘K¯ImportSpecifierÍPÍ`LªIdentifierÍPÍ`°resolveVideoMetaLªIdentifierÍPÍ`°resolveVideoMetaM§LiteralÍhÍµ../data/TitleResolver·'../data/TitleResolver'J±ImportDeclarationÍ‚Í¸‘K¯ImportSpecifierÍ‹Í˜LªIdentifierÍ‹Í˜­openVideoLinkLªIdentifierÍ‹Í˜­openVideoLinkM§LiteralÍ Í·µ../data/VideoLauncher·'../data/VideoLauncher'J±ImportDeclarationÍºÍø‘K¯ImportSpecifierÍÃÍÚLªIdentifierÍÃÍÚ·refreshAllWatchingFormsLªIdentifierÍÃÍÚ·refreshAllWatchingFormsM§LiteralÍâÍ÷³../data/FormUpdaterµ'../data/FormUpdater'J±ImportDeclarationÍúÍ/‘K¯ImportSpecifierÍÍLªIdentifierÍÍªCoverThumbLªIdentifierÍÍªCoverThumbM§LiteralÍÍ.·../component/CoverThumb¹'../component/CoverThumb'J±ImportDeclarationÍ1Ín‘K¯ImportSpecifierÍ:ÍKLªIdentifierÍ:ÍK±normalizeCoverUrlLªIdentifierÍ:ÍK±normalizeCoverUrlM§LiteralÍSÍm¸../data/WatchingCardDataº'../data/WatchingCardData'

@@ -2,6 +2,41 @@
   "runtimeOS": "HarmonyOS",
   "sdkInfo": "false:21:6.0.1.112:Release",
   "fileList": {
+    "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets": {
+      "mtimeMs": 1789839011966.0413,
+      "children": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\component\\CoverThumb.ets": {
+      "mtimeMs": 1789839189657.5903,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets": {
+      "mtimeMs": 1789839036824.54,
+      "children": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\component\\CoverThumb.ets"
+      ],
+      "parent": [],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets": {
+      "mtimeMs": 1789839013056.8801,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets"
+      ],
+      "error": false
+    },
     "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.promptAction.d.ts": {
       "mtimeMs": 1763803364000,
       "children": [

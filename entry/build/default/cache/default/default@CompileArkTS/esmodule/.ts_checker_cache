@@ -2,6 +2,49 @@
   "runtimeOS": "HarmonyOS",
   "sdkInfo": "false:21:6.0.1.112:Release",
   "fileList": {
+    "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets": {
+      "mtimeMs": 1789839011966.0413,
+      "children": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\component\\CoverThumb.ets": {
+      "mtimeMs": 1789839189657.5903,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\widget\\pages\\WatchingCard.ets": {
+      "mtimeMs": 1789839036824.54,
+      "children": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\component\\CoverThumb.ets"
+      ],
+      "parent": [],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets": {
+      "mtimeMs": 1789839013056.8801,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
     "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.UIAbility.d.ts": {
       "mtimeMs": 1763803364000,
       "children": [
@@ -85,10 +128,13 @@
       "error": false
     },
     "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets": {
-      "mtimeMs": 1789819472909.9792,
+      "mtimeMs": 1789839093704.1924,
       "children": [
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts"
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.bundle.bundleManager.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\TitleResolver.ets"
       ],
       "parent": [
         "E:\\new-chat\\entry\\src\\main\\ets\\entryability\\EntryAbility.ets",
@@ -224,13 +270,13 @@
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.bundle.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.rdb.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.multimodalInput.pointer.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.net.http.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.net.connection.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.net.socket.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.security.cert.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.security.cryptoFramework.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\graphics3d\\SceneResources.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\build-tools\\ets-loader\\declarations\\embedded_component.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\build-tools\\ets-loader\\declarations\\image.d.ts",
@@ -316,7 +362,8 @@
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\bundleManager\\HapModuleInfo.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\bundleManager\\ExtensionAbilityInfo.d.ts",
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.window.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.StartOptions.d.ts"
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.StartOptions.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets"
       ],
       "error": false
     },
@@ -726,8 +773,8 @@
       "parent": [
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.arkui.UIContext.d.ts",
         "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
         "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
         "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
       ],
       "error": false
@@ -1480,152 +1527,15 @@
       ],
       "error": false
     },
-    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts": {
-      "mtimeMs": 1763803364000,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\application\\FormExtensionContext.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Configuration.d.ts"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets"
-      ],
-      "error": false
-    },
-    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts": {
-      "mtimeMs": 1763803364000,
-      "children": [],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts"
-      ],
-      "error": false
-    },
-    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts": {
-      "mtimeMs": 1763803364000,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts"
-      ],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets": {
-      "mtimeMs": 1789819469398.619,
-      "children": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
-      ],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets": {
-      "mtimeMs": 1789819496752.2773,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
-      ],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets": {
-      "mtimeMs": 1789809976899.769,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
-      ],
-      "parent": [],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets": {
-      "mtimeMs": 1789750645737.5845,
-      "children": [],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
-      ],
-      "error": false
-    },
-    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts": {
-      "mtimeMs": 1763803364000,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.base.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
-      ],
-      "error": false
-    },
-    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts": {
-      "mtimeMs": 1763803364000,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.base.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\application\\BaseContext.d.ts"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets"
-      ],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets": {
-      "mtimeMs": 1789819480228.3716,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
-        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets"
-      ],
-      "parent": [
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
-      ],
-      "error": false
-    },
     "E:\\new-chat\\entry\\src\\main\\ets\\data\\TitleResolver.ets": {
-      "mtimeMs": 1789819498804.595,
+      "mtimeMs": 1789823864857.054,
       "children": [
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.net.http.d.ts"
       ],
       "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets",
         "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
       ],
-      "error": false
-    },
-    "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets": {
-      "mtimeMs": 1789809978479.464,
-      "children": [
-        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
-        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\TitleResolver.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets",
-        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
-      ],
-      "parent": [],
       "error": false
     },
     "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.net.http.d.ts": {
@@ -1685,6 +1595,137 @@
       "parent": [
         "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.security.cert.d.ts"
       ],
+      "error": false
+    },
+    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts": {
+      "mtimeMs": 1763803364000,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\application\\FormExtensionContext.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Configuration.d.ts"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets"
+      ],
+      "error": false
+    },
+    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts": {
+      "mtimeMs": 1763803364000,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts"
+      ],
+      "error": false
+    },
+    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts": {
+      "mtimeMs": 1763803364000,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets": {
+      "mtimeMs": 1789827613222.478,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets": {
+      "mtimeMs": 1789827621283.8508,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\entryformability\\EntryFormAbility.ets": {
+      "mtimeMs": 1789827637547.4473,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.FormExtensionAbility.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
+      ],
+      "parent": [],
+      "error": false
+    },
+    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.data.preferences.d.ts": {
+      "mtimeMs": 1763803364000,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.base.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\application\\BaseContext.d.ts"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
+      ],
+      "error": false
+    },
+    "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formProvider.d.ts": {
+      "mtimeMs": 1763803364000,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.base.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formBindingData.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.form.formInfo.d.ts",
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.Want.d.ts"
+      ],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\data\\ShareParser.ets": {
+      "mtimeMs": 1789820668842.2205,
+      "children": [],
+      "parent": [
+        "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets"
+      ],
+      "error": false
+    },
+    "E:\\new-chat\\entry\\src\\main\\ets\\pages\\Index.ets": {
+      "mtimeMs": 1789839060493.5833,
+      "children": [
+        "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\api\\@ohos.app.ability.common.d.ts",
+        "E:\\new-chat\\entry\\src\\main\\ets\\model\\VideoItem.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoRepository.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\ShareParser.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\TitleResolver.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\VideoLauncher.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\FormUpdater.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\component\\CoverThumb.ets",
+        "E:\\new-chat\\entry\\src\\main\\ets\\data\\WatchingCardData.ets"
+      ],
+      "parent": [],
       "error": false
     },
     "D:\\DevEco Studio\\sdk\\default\\openharmony\\ets\\build-tools\\ets-loader\\declarations\\action_sheet.d.ts": {

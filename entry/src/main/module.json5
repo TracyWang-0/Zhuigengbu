@@ -7,6 +7,17 @@
     "deviceTypes": ["phone", "tablet"],
     "deliveryWithInstall": true,
     "installationFree": false,
+    "querySchemes": [
+      "tenvideo2",
+      "txvideo",
+      "qqlive",
+      "bilibili",
+      "iqiyi",
+      "qiyimobile",
+      "youku",
+      "imgotv",
+      "mgtv"
+    ],
     "requestPermissions": [{ "name": "ohos.permission.INTERNET" }],
     "pages": "$profile:main_pages",
     "abilities": [

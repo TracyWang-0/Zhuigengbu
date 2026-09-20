@@ -13,6 +13,7 @@ interface Index_Params {
     totalEpisodesText?: string;
     progressText?: string;
     durationText?: string;
+    coverUrl?: string;
     note?: string;
     completed?: boolean;
     resolvingTitle?: boolean;
@@ -23,12 +24,15 @@ interface Index_Params {
     titleTimer?: number;
 }
 import type common from "@ohos:app.ability.common";
-import { detectPlatform, parseTime, toTime } from "@bundle:com.example.zhuigengbu/entry/ets/model/VideoItem";
+import { PLATFORMS, detectPlatform, parseTime, toTime } from "@bundle:com.example.zhuigengbu/entry/ets/model/VideoItem";
 import type { Platform, VideoItem } from "@bundle:com.example.zhuigengbu/entry/ets/model/VideoItem";
 import { VideoRepository } from "@bundle:com.example.zhuigengbu/entry/ets/data/VideoRepository";
-import { resolveVideoTitle } from "@bundle:com.example.zhuigengbu/entry/ets/data/TitleResolver";
+import { parseShareText } from "@bundle:com.example.zhuigengbu/entry/ets/data/ShareParser";
+import { resolveVideoMeta } from "@bundle:com.example.zhuigengbu/entry/ets/data/TitleResolver";
 import { openVideoLink } from "@bundle:com.example.zhuigengbu/entry/ets/data/VideoLauncher";
 import { refreshAllWatchingForms } from "@bundle:com.example.zhuigengbu/entry/ets/data/FormUpdater";
+import { CoverThumb } from "@bundle:com.example.zhuigengbu/entry/ets/component/CoverThumb";
+import { normalizeCoverUrl } from "@bundle:com.example.zhuigengbu/entry/ets/data/WatchingCardData";
 type Filter = '全部' | '在追' | '已看完';
 class Index extends ViewPU {
     constructor(parent, params, __localStorage, elmtId = -1, paramsLambda = undefined, extraInfo) {
@@ -45,8 +49,9 @@ class Index extends ViewPU {
         this.__platform = new ObservedPropertySimplePU('其他', this, "platform");
         this.__episodeText = new ObservedPropertySimplePU('', this, "episodeText");
         this.__totalEpisodesText = new ObservedPropertySimplePU('', this, "totalEpisodesText");
-        this.__progressText = new ObservedPropertySimplePU('00:00', this, "progressText");
+        this.__progressText = new ObservedPropertySimplePU('', this, "progressText");
         this.__durationText = new ObservedPropertySimplePU('', this, "durationText");
+        this.__coverUrl = new ObservedPropertySimplePU('', this, "coverUrl");
         this.__note = new ObservedPropertySimplePU('', this, "note");
         this.__completed = new ObservedPropertySimplePU(false, this, "completed");
         this.__resolvingTitle = new ObservedPropertySimplePU(false, this, "resolvingTitle");
@@ -92,6 +97,9 @@ class Index extends ViewPU {
         if (params.durationText !== undefined) {
             this.durationText = params.durationText;
         }
+        if (params.coverUrl !== undefined) {
+            this.coverUrl = params.coverUrl;
+        }
         if (params.note !== undefined) {
             this.note = params.note;
         }
@@ -131,6 +139,7 @@ class Index extends ViewPU {
         this.__totalEpisodesText.purgeDependencyOnElmtId(rmElmtId);
         this.__progressText.purgeDependencyOnElmtId(rmElmtId);
         this.__durationText.purgeDependencyOnElmtId(rmElmtId);
+        this.__coverUrl.purgeDependencyOnElmtId(rmElmtId);
         this.__note.purgeDependencyOnElmtId(rmElmtId);
         this.__completed.purgeDependencyOnElmtId(rmElmtId);
         this.__resolvingTitle.purgeDependencyOnElmtId(rmElmtId);
@@ -149,6 +158,7 @@ class Index extends ViewPU {
         this.__totalEpisodesText.aboutToBeDeleted();
         this.__progressText.aboutToBeDeleted();
         this.__durationText.aboutToBeDeleted();
+        this.__coverUrl.aboutToBeDeleted();
         this.__note.aboutToBeDeleted();
         this.__completed.aboutToBeDeleted();
         this.__resolvingTitle.aboutToBeDeleted();
@@ -234,6 +244,13 @@ class Index extends ViewPU {
     set durationText(newValue: string) {
         this.__durationText.set(newValue);
     }
+    private __coverUrl: ObservedPropertySimplePU<string>;
+    get coverUrl() {
+        return this.__coverUrl.get();
+    }
+    set coverUrl(newValue: string) {
+        this.__coverUrl.set(newValue);
+    }
     private __note: ObservedPropertySimplePU<string>;
     get note() {
         return this.__note.get();
@@ -285,7 +302,26 @@ class Index extends ViewPU {
         if (!this.repository) {
             return;
         }
-        this.videos = (await this.repository.load()).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+        const loaded = await this.repository.load();
+        let changed = false;
+        this.videos = loaded.map((item: VideoItem) => {
+            const detected = detectPlatform(item.url);
+            if (detected !== '其他' && item.platform !== detected) {
+                item.platform = detected;
+                changed = true;
+            }
+            if (typeof item.coverUrl !== 'string') {
+                item.coverUrl = '';
+            }
+            else {
+                item.coverUrl = normalizeCoverUrl(item.coverUrl);
+            }
+            return item;
+        }).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+        if (changed) {
+            await this.persist();
+        }
+        this.fillMissingCovers();
     }
     visibleVideos(): VideoItem[] {
         if (this.filter === '在追') {
@@ -297,46 +333,71 @@ class Index extends ViewPU {
         return this.videos;
     }
     handleUrlChange(value: string): void {
-        this.url = value;
-        this.platform = detectPlatform(value);
+        const parsed = parseShareText(value);
+        const extractedUrl = parsed.url.length > 0 ? parsed.url : value.trim();
+        this.url = extractedUrl;
+        const fromUrl = detectPlatform(extractedUrl.length > 0 ? extractedUrl : value);
+        this.platform = fromUrl !== '其他' ? fromUrl : detectPlatform(value);
+        if (parsed.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+            this.title = parsed.title;
+            this.titleFromLink = true;
+        }
         if (this.titleTimer >= 0) {
             clearTimeout(this.titleTimer);
             this.titleTimer = -1;
         }
-        const trimmed = value.trim();
-        if (!/^https?:\/\//i.test(trimmed)) {
+        if (!/^https?:\/\//i.test(extractedUrl)) {
             this.resolvingTitle = false;
-            this.titleHint = '';
-            return;
-        }
-        if (this.title.trim().length > 0 && !this.titleFromLink) {
-            this.resolvingTitle = false;
+            if (this.platform === '其他') {
+                this.titleHint = '';
+            }
             return;
         }
         const token = ++this.titleToken;
         this.resolvingTitle = true;
         this.titleHint = '正在识别标题…';
         this.titleTimer = setTimeout(() => {
-            this.fetchTitle(trimmed, token);
+            this.fetchMeta(extractedUrl, token);
         }, 450);
     }
-    async fetchTitle(url: string, token: number): Promise<void> {
+    handleTitleChange(value: string): void {
+        const parsed = parseShareText(value);
+        if (parsed.url.length > 0 && (this.url.trim().length === 0 || this.url.trim() === value.trim())) {
+            this.handleUrlChange(value);
+            return;
+        }
+        this.title = value;
+        this.titleFromLink = false;
+    }
+    async fetchMeta(url: string, token: number): Promise<void> {
         try {
-            const detectedTitle = await resolveVideoTitle(url);
+            const meta = await resolveVideoMeta(url);
             if (token !== this.titleToken || this.url.trim() !== url) {
                 return;
             }
-            if (detectedTitle.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
-                this.title = detectedTitle;
+            if (meta.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+                this.title = meta.title;
                 this.titleFromLink = true;
                 this.titleHint = '已根据链接填充标题，可再编辑';
-                const episodeMatch = detectedTitle.match(/第\s*(\d+)\s*集/);
+                const episodeMatch = meta.title.match(/第\s*(\d+)\s*集/);
                 if (episodeMatch && episodeMatch[1] && this.episodeText.length === 0) {
                     this.episodeText = episodeMatch[1];
                 }
             }
+            else if (this.title.trim().length > 0) {
+                this.titleHint = '已从分享内容识别，可再编辑';
+            }
             else {
                 this.titleHint = '未能自动识别标题，请手动填写';
+            }
+            if (meta.coverUrl.length > 0) {
+                this.coverUrl = meta.coverUrl;
+            }
+            if (meta.durationSeconds > 0 && this.durationText.trim().length === 0) {
+                this.durationText = toTime(meta.durationSeconds);
+            }
+            if (meta.progressSeconds > 0 && this.progressText.trim().length === 0) {
+                this.progressText = toTime(meta.progressSeconds);
             }
         }
         catch (_resolveError) {
@@ -350,6 +411,35 @@ class Index extends ViewPU {
             }
         }
     }
+    async fillMissingCovers(): Promise<void> {
+        let changed = false;
+        for (let i = 0; i < this.videos.length; i++) {
+            if (typeof this.videos[i].coverUrl === 'string' && this.videos[i].coverUrl.length > 0) {
+                continue;
+            }
+            try {
+                const meta = await resolveVideoMeta(this.videos[i].url);
+                if (meta.coverUrl.length > 0) {
+                    this.videos[i].coverUrl = meta.coverUrl;
+                    changed = true;
+                }
+                if (this.videos[i].durationSeconds === 0 && meta.durationSeconds > 0) {
+                    this.videos[i].durationSeconds = meta.durationSeconds;
+                    changed = true;
+                }
+                if (this.videos[i].progressSeconds === 0 && meta.progressSeconds > 0) {
+                    this.videos[i].progressSeconds = meta.progressSeconds;
+                    changed = true;
+                }
+            }
+            catch (metaError) {
+            }
+        }
+        if (changed) {
+            this.videos = this.videos.slice(0);
+            await this.persist();
+        }
+    }
     newVideo(): void {
         this.editingId = '';
         this.title = '';
@@ -357,8 +447,9 @@ class Index extends ViewPU {
         this.platform = '其他';
         this.episodeText = '';
         this.totalEpisodesText = '';
-        this.progressText = '00:00';
+        this.progressText = '';
         this.durationText = '';
+        this.coverUrl = '';
         this.note = '';
         this.completed = false;
         this.titleHint = '';
@@ -373,8 +464,9 @@ class Index extends ViewPU {
         this.platform = item.platform;
         this.episodeText = item.episode > 0 ? item.episode.toString() : '';
         this.totalEpisodesText = item.totalEpisodes > 0 ? item.totalEpisodes.toString() : '';
-        this.progressText = toTime(item.progressSeconds);
+        this.progressText = item.progressSeconds > 0 ? toTime(item.progressSeconds) : '';
         this.durationText = item.durationSeconds > 0 ? toTime(item.durationSeconds) : '';
+        this.coverUrl = typeof item.coverUrl === 'string' ? item.coverUrl : '';
         this.note = item.note;
         this.completed = item.completed;
         this.titleHint = '';
@@ -390,19 +482,40 @@ class Index extends ViewPU {
         await this.repository.save(this.videos);
         const context = this.getUIContext().getHostContext();
         if (context) {
-            await refreshAllWatchingForms(context);
+            await refreshAllWatchingForms(context, this.videos);
         }
     }
     async saveVideo(): Promise<void> {
-        if (this.title.trim().length === 0 || this.url.trim().length === 0) {
+        const parsed = parseShareText(this.url.length > 0 ? this.url : this.title);
+        const finalUrl = parsed.url.length > 0 ? parsed.url : this.url.trim();
+        const finalTitle = this.title.trim().length > 0 ? this.title.trim() : parsed.title;
+        if (finalTitle.length === 0 || finalUrl.length === 0) {
             return;
         }
+        if (this.coverUrl.length === 0 || this.durationText.trim().length === 0) {
+            try {
+                const meta = await resolveVideoMeta(finalUrl);
+                if (this.coverUrl.length === 0 && meta.coverUrl.length > 0) {
+                    this.coverUrl = meta.coverUrl;
+                }
+                if (this.durationText.trim().length === 0 && meta.durationSeconds > 0) {
+                    this.durationText = toTime(meta.durationSeconds);
+                }
+                if (this.progressText.trim().length === 0 && meta.progressSeconds > 0) {
+                    this.progressText = toTime(meta.progressSeconds);
+                }
+            }
+            catch (metaError) {
+            }
+        }
         const now = Date.now();
+        const detected = detectPlatform(`${finalUrl} ${finalTitle}`);
         const item: VideoItem = {
             id: this.editingId || `${now}`,
-            title: this.title.trim(),
-            url: this.url.trim(),
-            platform: this.platform === '其他' ? detectPlatform(this.url) : this.platform,
+            title: finalTitle,
+            url: finalUrl,
+            coverUrl: normalizeCoverUrl(this.coverUrl),
+            platform: detected !== '其他' ? detected : this.platform,
             episode: Number(this.episodeText) || 0,
             totalEpisodes: Number(this.totalEpisodesText) || 0,
             progressSeconds: parseTime(this.progressText),
@@ -427,12 +540,33 @@ class Index extends ViewPU {
         this.videos = this.videos.filter((item: VideoItem) => item.id !== id);
         await this.persist();
     }
+    confirmRemove(item: VideoItem): void {
+        this.getUIContext().showAlertDialog({
+            title: '确认删除',
+            message: `确定删除「${item.title}」吗？删除后无法恢复。`,
+            autoCancel: true,
+            primaryButton: {
+                value: '取消',
+                action: () => {
+                }
+            },
+            secondaryButton: {
+                value: '删除',
+                fontColor: '#C53B3B',
+                action: () => {
+                    this.removeVideo(item.id);
+                }
+            }
+        });
+    }
     async openWatch(item: VideoItem): Promise<void> {
         const context = this.getUIContext().getHostContext();
         if (!context) {
             return;
         }
-        await openVideoLink(context as common.UIAbilityContext, item.url);
+        const detected = detectPlatform(item.url);
+        const platform = detected !== '其他' ? detected : item.platform;
+        await openVideoLink(context as common.UIAbilityContext, item.url, platform, item.progressSeconds);
     }
     FilterButton(name: Filter, parent = null) {
         this.observeComponentCreation2((elmtId, isInitialRender) => {
@@ -455,9 +589,49 @@ class Index extends ViewPU {
             Column.width('100%');
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Column.create({ space: 10 });
-            Column.width('100%');
-            Column.onClick(() => this.openWatch(item));
+            Row.create({ space: 12 });
+            Row.width('100%');
+            Row.onClick(() => this.openWatch(item));
+        }, Row);
+        {
+            this.observeComponentCreation2((elmtId, isInitialRender) => {
+                if (isInitialRender) {
+                    let componentCall = new CoverThumb(this, {
+                        cover: normalizeCoverUrl(item.coverUrl),
+                        platform: item.platform,
+                        thumbWidth: 84,
+                        thumbHeight: 112,
+                        radius: 10,
+                        fontSize: 11
+                    }, undefined, elmtId, () => { }, { page: "entry/src/main/ets/pages/Index.ets", line: 336, col: 9 });
+                    ViewPU.create(componentCall);
+                    let paramsLambda = () => {
+                        return {
+                            cover: normalizeCoverUrl(item.coverUrl),
+                            platform: item.platform,
+                            thumbWidth: 84,
+                            thumbHeight: 112,
+                            radius: 10,
+                            fontSize: 11
+                        };
+                    };
+                    componentCall.paramsGenerator_ = paramsLambda;
+                }
+                else {
+                    this.updateStateVarsOfChildByElmtId(elmtId, {
+                        cover: normalizeCoverUrl(item.coverUrl),
+                        platform: item.platform,
+                        thumbWidth: 84,
+                        thumbHeight: 112,
+                        radius: 10,
+                        fontSize: 11
+                    });
+                }
+            }, { name: "CoverThumb" });
+        }
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            Column.create({ space: 8 });
+            Column.layoutWeight(1);
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Row.create();
@@ -487,7 +661,7 @@ class Index extends ViewPU {
             Text.create(item.title);
             Text.fontSize(18);
             Text.fontWeight(FontWeight.Medium);
-            Text.maxLines(1);
+            Text.maxLines(2);
             Text.textOverflow({ overflow: TextOverflow.Ellipsis });
             Text.width('100%');
         }, Text);
@@ -501,18 +675,37 @@ class Index extends ViewPU {
         Text.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
-            if (item.durationSeconds > 0) {
+            if (item.progressSeconds > 0) {
                 this.ifElseBranchUpdateFunction(0, () => {
                     this.observeComponentCreation2((elmtId, isInitialRender) => {
-                        Progress.create({
-                            value: Math.min(item.progressSeconds, item.durationSeconds),
-                            total: item.durationSeconds,
-                            type: ProgressType.Linear
-                        });
-                        Progress.color('#2F6BFF');
-                        Progress.backgroundColor('#E6EAF0');
-                        Progress.width('100%');
-                    }, Progress);
+                        If.create();
+                        if (item.durationSeconds > 0) {
+                            this.ifElseBranchUpdateFunction(0, () => {
+                                this.observeComponentCreation2((elmtId, isInitialRender) => {
+                                    Progress.create({
+                                        value: Math.min(item.progressSeconds, item.durationSeconds),
+                                        total: item.durationSeconds,
+                                        type: ProgressType.Linear
+                                    });
+                                    Progress.color('#2F6BFF');
+                                    Progress.backgroundColor('#E6EAF0');
+                                    Progress.width('100%');
+                                }, Progress);
+                            });
+                        }
+                        else {
+                            this.ifElseBranchUpdateFunction(1, () => {
+                            });
+                        }
+                    }, If);
+                    If.pop();
+                    this.observeComponentCreation2((elmtId, isInitialRender) => {
+                        Text.create(`进度 ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`);
+                        Text.fontSize(14);
+                        Text.fontColor('#3E4B5F');
+                        Text.width('100%');
+                    }, Text);
+                    Text.pop();
                 });
             }
             else {
@@ -521,13 +714,6 @@ class Index extends ViewPU {
             }
         }, If);
         If.pop();
-        this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Text.create(`进度 ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`);
-            Text.fontSize(14);
-            Text.fontColor('#3E4B5F');
-            Text.width('100%');
-        }, Text);
-        Text.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
             if (item.note.length > 0) {
@@ -550,16 +736,11 @@ class Index extends ViewPU {
         }, If);
         If.pop();
         Column.pop();
+        Row.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Row.create({ space: 8 });
             Row.width('100%');
         }, Row);
-        this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Button.createWithLabel('继续观看');
-            Button.layoutWeight(1);
-            Button.onClick(() => this.openWatch(item));
-        }, Button);
-        Button.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Button.createWithLabel('更新进度');
             Button.layoutWeight(1);
@@ -570,7 +751,7 @@ class Index extends ViewPU {
             Button.createWithLabel('删除');
             Button.fontColor('#C53B3B');
             Button.backgroundColor('#FFF0F0');
-            Button.onClick(() => this.removeVideo(item.id));
+            Button.onClick(() => this.confirmRemove(item));
         }, Button);
         Button.pop();
         Row.pop();
@@ -582,7 +763,12 @@ class Index extends ViewPU {
             Stack.height('100%');
             Stack.bindSheet({ value: this.showEditor, changeEvent: newValue => { this.showEditor = newValue; } }, { builder: () => {
                     this.EditorSheet.call(this);
-                } }, { height: 620, showClose: true });
+                } }, {
+                height: 680,
+                showClose: true,
+                dragBar: true,
+                title: this.editorSheetTitle()
+            });
         }, Stack);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Column.create();
@@ -666,6 +852,8 @@ class Index extends ViewPU {
                         List.create({ space: 12 });
                         List.layoutWeight(1);
                         List.width('100%');
+                        List.padding({ bottom: 56 });
+                        List.scrollBar(BarState.Off);
                     }, List);
                     this.observeComponentCreation2((elmtId, isInitialRender) => {
                         ForEach.create();
@@ -708,11 +896,17 @@ class Index extends ViewPU {
             Button.backgroundColor('#2F6BFF');
             Button.borderRadius(24);
             Button.padding({ left: 20, right: 20 });
-            Button.margin(24);
+            Button.margin({ left: 20, right: 20, bottom: 16 });
             Button.onClick(() => this.newVideo());
         }, Button);
         Button.pop();
         Stack.pop();
+    }
+    editorSheetTitle(): SheetTitleOptions {
+        const options: SheetTitleOptions = {
+            title: this.editingId.length > 0 ? '更新进度' : '添加视频'
+        };
+        return options;
     }
     EditorSheet(parent = null) {
         this.observeComponentCreation2((elmtId, isInitialRender) => {
@@ -720,27 +914,48 @@ class Index extends ViewPU {
         }, Scroll);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             Column.create({ space: 14 });
-            Column.padding({ left: 20, right: 20, top: 10, bottom: 32 });
+            Column.padding({ left: 20, right: 20, top: 24, bottom: 36 });
             Column.width('100%');
         }, Column);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            TextInput.create({ placeholder: '视频标题（粘贴链接后自动填充）', text: this.title });
-            TextInput.onChange((value: string) => {
-                this.title = value;
-                this.titleFromLink = false;
-            });
+            TextInput.create({ placeholder: '视频标题（可粘贴分享口令）', text: this.title });
+            TextInput.onChange((value: string) => this.handleTitleChange(value));
         }, TextInput);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            TextInput.create({ placeholder: '粘贴视频链接（必填）', text: this.url });
+            TextInput.create({ placeholder: '粘贴分享内容或链接（必填）', text: this.url });
             TextInput.onChange((value: string) => this.handleUrlChange(value));
         }, TextInput);
         this.observeComponentCreation2((elmtId, isInitialRender) => {
-            Text.create(`平台：${this.platform}`);
-            Text.fontSize(14);
+            Text.create('平台标签');
+            Text.fontSize(13);
             Text.fontColor('#637083');
             Text.width('100%');
         }, Text);
         Text.pop();
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            Flex.create({ wrap: FlexWrap.Wrap });
+            Flex.width('100%');
+        }, Flex);
+        this.observeComponentCreation2((elmtId, isInitialRender) => {
+            ForEach.create();
+            const forEachItemGenFunction = _item => {
+                const name = _item;
+                this.observeComponentCreation2((elmtId, isInitialRender) => {
+                    Text.create(name);
+                    Text.fontSize(12);
+                    Text.fontColor(this.platform === name ? Color.White : '#2F6BFF');
+                    Text.backgroundColor(this.platform === name ? '#2F6BFF' : '#E8F0FF');
+                    Text.padding({ left: 10, right: 10, top: 6, bottom: 6 });
+                    Text.borderRadius(8);
+                    Text.margin({ right: 8, bottom: 8 });
+                    Text.onClick(() => this.platform = name);
+                }, Text);
+                Text.pop();
+            };
+            this.forEachUpdateFunction(elmtId, PLATFORMS, forEachItemGenFunction, (name: Platform) => name, false, false);
+        }, ForEach);
+        ForEach.pop();
+        Flex.pop();
         this.observeComponentCreation2((elmtId, isInitialRender) => {
             If.create();
             if (this.titleHint.length > 0) {

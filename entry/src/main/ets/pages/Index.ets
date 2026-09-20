@@ -1,9 +1,12 @@
 import common from '@ohos.app.ability.common';
-import { Platform, VideoItem, detectPlatform, parseTime, toTime } from '../model/VideoItem';
+import { Platform, PLATFORMS, VideoItem, detectPlatform, parseTime, toTime } from '../model/VideoItem';
 import { VideoRepository } from '../data/VideoRepository';
-import { resolveVideoTitle } from '../data/TitleResolver';
+import { parseShareText } from '../data/ShareParser';
+import { resolveVideoMeta } from '../data/TitleResolver';
 import { openVideoLink } from '../data/VideoLauncher';
 import { refreshAllWatchingForms } from '../data/FormUpdater';
+import { CoverThumb } from '../component/CoverThumb';
+import { normalizeCoverUrl } from '../data/WatchingCardData';
 
 type Filter = '全部' | '在追' | '已看完';
 
@@ -19,8 +22,9 @@ struct Index {
   @State platform: Platform = '其他';
   @State episodeText: string = '';
   @State totalEpisodesText: string = '';
-  @State progressText: string = '00:00';
+  @State progressText: string = '';
   @State durationText: string = '';
+  @State coverUrl: string = '';
   @State note: string = '';
   @State completed: boolean = false;
   @State resolvingTitle: boolean = false;
@@ -44,7 +48,25 @@ struct Index {
     if (!this.repository) {
       return;
     }
-    this.videos = (await this.repository.load()).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+    const loaded = await this.repository.load();
+    let changed = false;
+    this.videos = loaded.map((item: VideoItem) => {
+      const detected = detectPlatform(item.url);
+      if (detected !== '其他' && item.platform !== detected) {
+        item.platform = detected;
+        changed = true;
+      }
+      if (typeof item.coverUrl !== 'string') {
+        item.coverUrl = '';
+      } else {
+        item.coverUrl = normalizeCoverUrl(item.coverUrl);
+      }
+      return item;
+    }).sort((a: VideoItem, b: VideoItem) => b.updatedAt - a.updatedAt);
+    if (changed) {
+      await this.persist();
+    }
+    this.fillMissingCovers();
   }
 
   visibleVideos(): VideoItem[] {
@@ -58,46 +80,71 @@ struct Index {
   }
 
   handleUrlChange(value: string): void {
-    this.url = value;
-    this.platform = detectPlatform(value);
+    const parsed = parseShareText(value);
+    const extractedUrl = parsed.url.length > 0 ? parsed.url : value.trim();
+    this.url = extractedUrl;
+    const fromUrl = detectPlatform(extractedUrl.length > 0 ? extractedUrl : value);
+    this.platform = fromUrl !== '其他' ? fromUrl : detectPlatform(value);
+    if (parsed.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+      this.title = parsed.title;
+      this.titleFromLink = true;
+    }
     if (this.titleTimer >= 0) {
       clearTimeout(this.titleTimer);
       this.titleTimer = -1;
     }
-    const trimmed = value.trim();
-    if (!/^https?:\/\//i.test(trimmed)) {
+    if (!/^https?:\/\//i.test(extractedUrl)) {
       this.resolvingTitle = false;
-      this.titleHint = '';
-      return;
-    }
-    if (this.title.trim().length > 0 && !this.titleFromLink) {
-      this.resolvingTitle = false;
+      if (this.platform === '其他') {
+        this.titleHint = '';
+      }
       return;
     }
     const token = ++this.titleToken;
     this.resolvingTitle = true;
     this.titleHint = '正在识别标题…';
     this.titleTimer = setTimeout(() => {
-      this.fetchTitle(trimmed, token);
+      this.fetchMeta(extractedUrl, token);
     }, 450);
   }
 
-  async fetchTitle(url: string, token: number): Promise<void> {
+  handleTitleChange(value: string): void {
+    const parsed = parseShareText(value);
+    if (parsed.url.length > 0 && (this.url.trim().length === 0 || this.url.trim() === value.trim())) {
+      this.handleUrlChange(value);
+      return;
+    }
+    this.title = value;
+    this.titleFromLink = false;
+  }
+
+  async fetchMeta(url: string, token: number): Promise<void> {
     try {
-      const detectedTitle = await resolveVideoTitle(url);
+      const meta = await resolveVideoMeta(url);
       if (token !== this.titleToken || this.url.trim() !== url) {
         return;
       }
-      if (detectedTitle.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
-        this.title = detectedTitle;
+      if (meta.title.length > 0 && (this.title.trim().length === 0 || this.titleFromLink)) {
+        this.title = meta.title;
         this.titleFromLink = true;
         this.titleHint = '已根据链接填充标题，可再编辑';
-        const episodeMatch = detectedTitle.match(/第\s*(\d+)\s*集/);
+        const episodeMatch = meta.title.match(/第\s*(\d+)\s*集/);
         if (episodeMatch && episodeMatch[1] && this.episodeText.length === 0) {
           this.episodeText = episodeMatch[1];
         }
+      } else if (this.title.trim().length > 0) {
+        this.titleHint = '已从分享内容识别，可再编辑';
       } else {
         this.titleHint = '未能自动识别标题，请手动填写';
+      }
+      if (meta.coverUrl.length > 0) {
+        this.coverUrl = meta.coverUrl;
+      }
+      if (meta.durationSeconds > 0 && this.durationText.trim().length === 0) {
+        this.durationText = toTime(meta.durationSeconds);
+      }
+      if (meta.progressSeconds > 0 && this.progressText.trim().length === 0) {
+        this.progressText = toTime(meta.progressSeconds);
       }
     } catch (_resolveError) {
       if (token === this.titleToken) {
@@ -110,6 +157,35 @@ struct Index {
     }
   }
 
+  async fillMissingCovers(): Promise<void> {
+    let changed = false;
+    for (let i = 0; i < this.videos.length; i++) {
+      if (typeof this.videos[i].coverUrl === 'string' && this.videos[i].coverUrl.length > 0) {
+        continue;
+      }
+      try {
+        const meta = await resolveVideoMeta(this.videos[i].url);
+        if (meta.coverUrl.length > 0) {
+          this.videos[i].coverUrl = meta.coverUrl;
+          changed = true;
+        }
+        if (this.videos[i].durationSeconds === 0 && meta.durationSeconds > 0) {
+          this.videos[i].durationSeconds = meta.durationSeconds;
+          changed = true;
+        }
+        if (this.videos[i].progressSeconds === 0 && meta.progressSeconds > 0) {
+          this.videos[i].progressSeconds = meta.progressSeconds;
+          changed = true;
+        }
+      } catch (metaError) {
+      }
+    }
+    if (changed) {
+      this.videos = this.videos.slice(0);
+      await this.persist();
+    }
+  }
+
   newVideo(): void {
     this.editingId = '';
     this.title = '';
@@ -117,8 +193,9 @@ struct Index {
     this.platform = '其他';
     this.episodeText = '';
     this.totalEpisodesText = '';
-    this.progressText = '00:00';
+    this.progressText = '';
     this.durationText = '';
+    this.coverUrl = '';
     this.note = '';
     this.completed = false;
     this.titleHint = '';
@@ -134,8 +211,9 @@ struct Index {
     this.platform = item.platform;
     this.episodeText = item.episode > 0 ? item.episode.toString() : '';
     this.totalEpisodesText = item.totalEpisodes > 0 ? item.totalEpisodes.toString() : '';
-    this.progressText = toTime(item.progressSeconds);
+    this.progressText = item.progressSeconds > 0 ? toTime(item.progressSeconds) : '';
     this.durationText = item.durationSeconds > 0 ? toTime(item.durationSeconds) : '';
+    this.coverUrl = typeof item.coverUrl === 'string' ? item.coverUrl : '';
     this.note = item.note;
     this.completed = item.completed;
     this.titleHint = '';
@@ -152,20 +230,40 @@ struct Index {
     await this.repository.save(this.videos);
     const context = this.getUIContext().getHostContext();
     if (context) {
-      await refreshAllWatchingForms(context);
+      await refreshAllWatchingForms(context, this.videos);
     }
   }
 
   async saveVideo(): Promise<void> {
-    if (this.title.trim().length === 0 || this.url.trim().length === 0) {
+    const parsed = parseShareText(this.url.length > 0 ? this.url : this.title);
+    const finalUrl = parsed.url.length > 0 ? parsed.url : this.url.trim();
+    const finalTitle = this.title.trim().length > 0 ? this.title.trim() : parsed.title;
+    if (finalTitle.length === 0 || finalUrl.length === 0) {
       return;
     }
+    if (this.coverUrl.length === 0 || this.durationText.trim().length === 0) {
+      try {
+        const meta = await resolveVideoMeta(finalUrl);
+        if (this.coverUrl.length === 0 && meta.coverUrl.length > 0) {
+          this.coverUrl = meta.coverUrl;
+        }
+        if (this.durationText.trim().length === 0 && meta.durationSeconds > 0) {
+          this.durationText = toTime(meta.durationSeconds);
+        }
+        if (this.progressText.trim().length === 0 && meta.progressSeconds > 0) {
+          this.progressText = toTime(meta.progressSeconds);
+        }
+      } catch (metaError) {
+      }
+    }
     const now = Date.now();
+    const detected = detectPlatform(`${finalUrl} ${finalTitle}`);
     const item: VideoItem = {
       id: this.editingId || `${now}`,
-      title: this.title.trim(),
-      url: this.url.trim(),
-      platform: this.platform === '其他' ? detectPlatform(this.url) : this.platform,
+      title: finalTitle,
+      url: finalUrl,
+      coverUrl: normalizeCoverUrl(this.coverUrl),
+      platform: detected !== '其他' ? detected : this.platform,
       episode: Number(this.episodeText) || 0,
       totalEpisodes: Number(this.totalEpisodesText) || 0,
       progressSeconds: parseTime(this.progressText),
@@ -191,12 +289,34 @@ struct Index {
     await this.persist();
   }
 
+  confirmRemove(item: VideoItem): void {
+    this.getUIContext().showAlertDialog({
+      title: '确认删除',
+      message: `确定删除「${item.title}」吗？删除后无法恢复。`,
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: '#C53B3B',
+        action: () => {
+          this.removeVideo(item.id);
+        }
+      }
+    });
+  }
+
   async openWatch(item: VideoItem): Promise<void> {
     const context = this.getUIContext().getHostContext();
     if (!context) {
       return;
     }
-    await openVideoLink(context as common.UIAbilityContext, item.url);
+    const detected = detectPlatform(item.url);
+    const platform = detected !== '其他' ? detected : item.platform;
+    await openVideoLink(context as common.UIAbilityContext, item.url, platform, item.progressSeconds);
   }
 
   @Builder
@@ -212,56 +332,67 @@ struct Index {
   @Builder
   VideoCard(item: VideoItem) {
     Column({ space: 10 }) {
-      Column({ space: 10 }) {
-        Row() {
-          Text(item.platform)
-            .fontSize(12)
-            .fontColor('#2F6BFF')
-            .backgroundColor('#E8F0FF')
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .borderRadius(8)
-          Blank()
-          Text(item.completed ? '已看完' : '在追')
-            .fontSize(12)
-            .fontColor(item.completed ? '#25885A' : '#C46A00')
-        }.width('100%')
-        Text(item.title)
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-        Text(item.episode > 0 ? `第 ${item.episode} 集${item.totalEpisodes > 0 ? ` / 共 ${item.totalEpisodes} 集` : ''}` : '单集或未填写集数')
-          .fontSize(14)
-          .fontColor('#637083')
-          .width('100%')
-        if (item.durationSeconds > 0) {
-          Progress({
-            value: Math.min(item.progressSeconds, item.durationSeconds),
-            total: item.durationSeconds,
-            type: ProgressType.Linear
-          }).color('#2F6BFF').backgroundColor('#E6EAF0').width('100%')
-        }
-        Text(`进度 ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`)
-          .fontSize(14)
-          .fontColor('#3E4B5F')
-          .width('100%')
-        if (item.note.length > 0) {
-          Text(item.note)
-            .fontSize(13)
-            .fontColor('#7B8798')
-            .maxLines(1)
+      Row({ space: 12 }) {
+        CoverThumb({
+          cover: normalizeCoverUrl(item.coverUrl),
+          platform: item.platform,
+          thumbWidth: 84,
+          thumbHeight: 112,
+          radius: 10,
+          fontSize: 11
+        })
+        Column({ space: 8 }) {
+          Row() {
+            Text(item.platform)
+              .fontSize(12)
+              .fontColor('#2F6BFF')
+              .backgroundColor('#E8F0FF')
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(8)
+            Blank()
+            Text(item.completed ? '已看完' : '在追')
+              .fontSize(12)
+              .fontColor(item.completed ? '#25885A' : '#C46A00')
+          }.width('100%')
+          Text(item.title)
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-        }
+          Text(item.episode > 0 ? `第 ${item.episode} 集${item.totalEpisodes > 0 ? ` / 共 ${item.totalEpisodes} 集` : ''}` : '单集或未填写集数')
+            .fontSize(14)
+            .fontColor('#637083')
+            .width('100%')
+          if (item.progressSeconds > 0) {
+            if (item.durationSeconds > 0) {
+              Progress({
+                value: Math.min(item.progressSeconds, item.durationSeconds),
+                total: item.durationSeconds,
+                type: ProgressType.Linear
+              }).color('#2F6BFF').backgroundColor('#E6EAF0').width('100%')
+            }
+            Text(`进度 ${toTime(item.progressSeconds)}${item.durationSeconds > 0 ? ` / ${toTime(item.durationSeconds)}` : ''}`)
+              .fontSize(14)
+              .fontColor('#3E4B5F')
+              .width('100%')
+          }
+          if (item.note.length > 0) {
+            Text(item.note)
+              .fontSize(13)
+              .fontColor('#7B8798')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+        }.layoutWeight(1)
       }
       .width('100%')
       .onClick(() => this.openWatch(item))
 
       Row({ space: 8 }) {
-        Button('继续观看').layoutWeight(1).onClick(() => this.openWatch(item))
         Button('更新进度').layoutWeight(1).onClick(() => this.editVideo(item))
-        Button('删除').fontColor('#C53B3B').backgroundColor('#FFF0F0').onClick(() => this.removeVideo(item.id))
+        Button('删除').fontColor('#C53B3B').backgroundColor('#FFF0F0').onClick(() => this.confirmRemove(item))
       }.width('100%')
     }
     .padding(16)
@@ -304,7 +435,7 @@ struct Index {
                 this.VideoCard(item)
               }
             }, (item: VideoItem) => item.id)
-          }.layoutWeight(1).width('100%')
+          }.layoutWeight(1).width('100%').padding({ bottom: 56 }).scrollBar(BarState.Off)
         }
       }.padding(20).height('100%').backgroundColor('#F7F9FC')
       Button('+ 添加视频')
@@ -313,28 +444,49 @@ struct Index {
         .backgroundColor('#2F6BFF')
         .borderRadius(24)
         .padding({ left: 20, right: 20 })
-        .margin(24)
+        .margin({ left: 20, right: 20, bottom: 16 })
         .onClick(() => this.newVideo())
     }
     .height('100%')
-    .bindSheet($$this.showEditor, this.EditorSheet(), { height: 620, showClose: true })
+    .bindSheet($$this.showEditor, this.EditorSheet(), {
+      height: 680,
+      showClose: true,
+      dragBar: true,
+      title: this.editorSheetTitle()
+    })
+  }
+
+  editorSheetTitle(): SheetTitleOptions {
+    const options: SheetTitleOptions = {
+      title: this.editingId.length > 0 ? '更新进度' : '添加视频'
+    };
+    return options;
   }
 
   @Builder
   EditorSheet() {
     Scroll() {
       Column({ space: 14 }) {
-        TextInput({ placeholder: '视频标题（粘贴链接后自动填充）', text: this.title })
-          .onChange((value: string) => {
-            this.title = value;
-            this.titleFromLink = false;
-          })
-        TextInput({ placeholder: '粘贴视频链接（必填）', text: this.url })
+        TextInput({ placeholder: '视频标题（可粘贴分享口令）', text: this.title })
+          .onChange((value: string) => this.handleTitleChange(value))
+        TextInput({ placeholder: '粘贴分享内容或链接（必填）', text: this.url })
           .onChange((value: string) => this.handleUrlChange(value))
-        Text(`平台：${this.platform}`)
-          .fontSize(14)
+        Text('平台标签')
+          .fontSize(13)
           .fontColor('#637083')
           .width('100%')
+        Flex({ wrap: FlexWrap.Wrap }) {
+          ForEach(PLATFORMS, (name: Platform) => {
+            Text(name)
+              .fontSize(12)
+              .fontColor(this.platform === name ? Color.White : '#2F6BFF')
+              .backgroundColor(this.platform === name ? '#2F6BFF' : '#E8F0FF')
+              .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+              .borderRadius(8)
+              .margin({ right: 8, bottom: 8 })
+              .onClick(() => this.platform = name)
+          }, (name: Platform) => name)
+        }.width('100%')
         if (this.titleHint.length > 0) {
           Text(this.titleHint)
             .fontSize(12)
@@ -372,7 +524,7 @@ struct Index {
           .backgroundColor('#2F6BFF')
           .width('100%')
           .onClick(() => this.saveVideo())
-      }.padding({ left: 20, right: 20, top: 10, bottom: 32 }).width('100%')
+      }.padding({ left: 20, right: 20, top: 24, bottom: 36 }).width('100%')
     }
   }
 }
